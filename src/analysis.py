@@ -278,3 +278,20 @@ print(
 )
 
 print("=" * 70)
+
+
+
+print("\n" + "=" * 70)
+print("CLASSES")
+print("=" * 70)
+
+aircraft_image_counts = (
+    df.groupby("class")["filename"]
+    .nunique()
+    .sort_index()
+)
+
+for cls, count in aircraft_image_counts.items():
+    print(f"{cls:15s}: {count:5d}")
+
+print("=" * 70)

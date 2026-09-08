@@ -1,0 +1,208 @@
+import os
+import cv2
+import torch
+import numpy as np
+
+from ultralytics import YOLO
+from pytorch_grad_cam import EigenCAM
+from pytorch_grad_cam.utils.image import show_cam_on_image
+
+
+# ============================================================
+# PATHS
+# ============================================================
+
+WEIGHTS = (
+    "/home/admin1/Abishek-Intern/new_atr/"
+    "runs/yolov8s_832_balanced800/weights/best.pt"
+)
+
+SOURCE = (
+    "/home/admin1/Abishek-Intern/new_atr/"
+    "data/newdata/test/images"
+)
+
+OUTPUT = (
+    "/home/admin1/Abishek-Intern/new_atr/"
+    "data/newdata/test/eigencam"
+)
+
+os.makedirs(OUTPUT, exist_ok=True)
+
+
+# ============================================================
+# LOAD MODEL
+# ============================================================
+
+print("Loading model...")
+
+model = YOLO(WEIGHTS)
+
+names = model.names
+
+print("Number of classes:", len(names))
+
+
+# ============================================================
+# EIGENCAM TARGET LAYER
+# ============================================================
+
+# This is the layer that worked with your previous
+# YOLOv8 EigenCAM implementation.
+
+target_layers = [model.model.model[-4]]
+
+print("Target layer:", target_layers[0])
+
+
+# ============================================================
+# PROCESS IMAGES
+# ============================================================
+
+image_files = []
+
+for f in sorted(os.listdir(SOURCE)):
+    if f.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".webp")):
+        image_files.append(os.path.join(SOURCE, f))
+
+print("Images found:", len(image_files))
+
+
+for index, image_path in enumerate(image_files, 1):
+
+    print(f"[{index}/{len(image_files)}] {os.path.basename(image_path)}")
+
+    # --------------------------------------------------------
+    # Read image
+    # --------------------------------------------------------
+
+    img = cv2.imread(image_path)
+
+    if img is None:
+        print("  Could not read image")
+        continue
+
+    # --------------------------------------------------------
+    # YOLO prediction
+    # --------------------------------------------------------
+
+    results = model.predict(
+        source=img,
+        imgsz=832,
+        conf=0.10,
+        device=0,
+        verbose=False
+    )
+
+    result = results[0]
+
+    # --------------------------------------------------------
+    # Prepare RGB image for CAM
+    # --------------------------------------------------------
+
+    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+    rgb_float = rgb.astype(np.float32) / 255.0
+
+    # --------------------------------------------------------
+    # EigenCAM
+    # --------------------------------------------------------
+
+    try:
+
+        cam = EigenCAM(
+            model.model,
+            target_layers
+        )
+
+        grayscale_cam = cam(
+            input_tensor=torch.from_numpy(
+                rgb_float.transpose(2, 0, 1)
+            ).unsqueeze(0).float()
+        )[0]
+
+    except Exception as e:
+
+        print("  EigenCAM failed:", e)
+        continue
+
+    # --------------------------------------------------------
+    # Resize CAM to original image
+    # --------------------------------------------------------
+
+    grayscale_cam = cv2.resize(
+        grayscale_cam,
+        (img.shape[1], img.shape[0])
+    )
+
+    # --------------------------------------------------------
+    # Overlay heatmap
+    # --------------------------------------------------------
+
+    visualization = show_cam_on_image(
+        rgb_float,
+        grayscale_cam,
+        use_rgb=True
+    )
+
+    visualization = cv2.cvtColor(
+        visualization,
+        cv2.COLOR_RGB2BGR
+    )
+
+    # --------------------------------------------------------
+    # Draw YOLO detections
+    # --------------------------------------------------------
+
+    if result.boxes is not None:
+
+        for box in result.boxes:
+
+            xyxy = box.xyxy[0].cpu().numpy().astype(int)
+
+            cls_id = int(box.cls[0].item())
+
+            conf = float(box.conf[0].item())
+
+            x1, y1, x2, y2 = xyxy
+
+            label = f"{names[cls_id]} {conf:.2f}"
+
+            cv2.rectangle(
+                visualization,
+                (x1, y1),
+                (x2, y2),
+                (0, 255, 0),
+                2
+            )
+
+            cv2.putText(
+                visualization,
+                label,
+                (x1, max(y1 - 10, 20)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 255, 0),
+                2
+            )
+
+    # --------------------------------------------------------
+    # Save
+    # --------------------------------------------------------
+
+    filename = os.path.basename(image_path)
+
+    output_path = os.path.join(
+        OUTPUT,
+        filename
+    )
+
+    cv2.imwrite(
+        output_path,
+        visualization
+    )
+
+
+print("\nDone.")
+print("EigenCAM outputs:")
+print(OUTPUT)
