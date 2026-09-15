@@ -1,0 +1,44 @@
+.stApp {
+    background-color: #f8f9fa;
+}
+
+.header-container {
+    background-color: #004a99; /* Professional Deep Blue */
+    padding: 2rem 1rem;
+    border-radius: 15px;
+    text-align: center;
+    color: white;
+    margin-bottom: 2rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.header-title {
+    font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    font-weight: 800 !important;
+    color: #ffffff !important;
+    margin-bottom: 0.5rem !important;
+}
+
+.header-subtitle {
+    font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    font-size: 1.2rem !important;
+    color: #e0e0e0 !important;
+    opacity: 0.9;
+}
+
+/* ENHANCED BUTTONS [1]  #004a99 #2D3748 */
+div.stButton button {
+    height: 3.5em !important;
+    font-weight: bold !important;
+    font-size: 18px !important;
+    border: 1px solid #ccc !important;
+    border-radius: 12px !important;
+    transition: all 0.3s ease !important;
+    cursor: pointer;
+}
+
+div.stButton button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    border-color: #005A70 !important;
+}

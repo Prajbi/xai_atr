@@ -14,8 +14,7 @@ from pytorch_grad_cam.utils.image import show_cam_on_image
 # ============================================================
 
 WEIGHTS = (
-    "/home/admin1/Abishek-Intern/new_atr/"
-    "runs/yolov8s_832_balanced800/weights/best.pt"
+    "/home/admin1/Abishek-Intern/new_atr/runs/best.pt"
 )
 
 IMAGE_DIR = (
@@ -25,14 +24,14 @@ IMAGE_DIR = (
 
 OUTPUT_DIR = (
     "/home/admin1/Abishek-Intern/new_atr/"
-    "data/newdata/test/eigencam_minus5"
+    "data/newdata/test/eigencam_minus5_new"
 )
 
 IMG_SIZE = 832
 DEVICE = "cuda:0"
-CONF = 0.10
+CONF = 0.05
 
-MAX_IMAGES = 10
+MAX_IMAGES = 100
 
 
 # ============================================================
