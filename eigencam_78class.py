@@ -15,8 +15,7 @@ from pytorch_grad_cam.utils.image import show_cam_on_image
 # ============================================================
 
 WEIGHTS = (
-    "/home/admin1/Abishek-Intern/new_atr/"
-    "runs/yolov8s_832_balanced800/weights/best.pt"
+    "/home/admin1/Abishek-Intern/new_atr/new/models/yolo_aircraft.pt"
 )
 
 SOURCE = (
@@ -25,12 +24,11 @@ SOURCE = (
 )
 
 OUTPUT = (
-    "/home/admin1/Abishek-Intern/new_atr/"
-    "data/newdata/test/eigencam"
+    "/home/admin1/Abishek-Intern/new_atr/new/eigencam"
 )
 
 IMG_SIZE = 832
-CONF = 0.10
+CONF = 0.5
 DEVICE = "cuda:0"
 
 

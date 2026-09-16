@@ -14,7 +14,7 @@ class BaseAIClassifier:
 
     def draw_detections(self, pil_image, detections, box_color):
         cv_image = self._prepare_image(pil_image)
-        CONF_THRESHOLD = 0.05
+        CONF_THRESHOLD = 0.5
         COLOR_LOW_CONF = (0, 0, 255) # Red
 
         for det in detections:

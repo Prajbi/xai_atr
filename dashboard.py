@@ -1,6 +1,5 @@
 import io
 from pathlib import Path
-
 import cv2
 import numpy as np
 import pandas as pd
@@ -19,51 +18,37 @@ st.set_page_config(
 PROJECT_ROOT = Path(__file__).resolve().parent
 MODEL_PATH = (
     PROJECT_ROOT
-    / "runs"
-    / "yolov8s_832_balanced800"
-    / "weights"
-    / "best.pt"
+    / "new"
+    / "models"
+    / "yolo_aircraft.pt"
 )
 # GPU CHECK
 if not torch.cuda.is_available():
-
     st.error(
         "CUDA GPU is not available. "
         "This application is configured for GPU-only inference."
     )
-
     st.stop()
-
-
 DEVICE = 0
-
 GPU_NAME = torch.cuda.get_device_name(0)
 # LOAD MODEL
 @st.cache_resource
 def load_model():
-
     if not MODEL_PATH.exists():
-
         st.error(
             f"Model file not found:\n\n{MODEL_PATH}"
         )
-
-         st.stop()
-
+        st.stop()
     model = YOLO(
         str(MODEL_PATH)
     )
-
     return model
-
-
 model = load_model()
 # SIDEBAR
 st.sidebar.title("Detection Settings")
 st.sidebar.markdown(
     "### Confidence Threshold"
 )
-
 confidence = st.sidebar.slider(
     "Confidence",
     min_value=0.01,
@@ -87,41 +72,20 @@ st.sidebar.info(
 st.sidebar.write(
     f"**Model:** `{MODEL_PATH.name}`"
 )
-
 st.sidebar.write(
     "**Architecture:** YOLOv8s"
 )
-
 st.sidebar.write(
     "**Task:** Object Detection"
 )
-
 if hasattr(model, "names"):
-
-    st.sidebar.write(
-        f"**Number of Classes:** {len(model.names)}"
-    )
-
-st.sidebar.write(
-    "**Input Size:** 832 × 832"
-)
-
-st.sidebar.write(
-    "**Device:** CUDA:0"
-)
-
-st.sidebar.write(
-    f"**GPU:** {GPU_NAME}"
-)
-
+    st.sidebar.write(f"**Number of Classes:** {len(model.names)}")
+st.sidebar.write("**Input Size:** 832 × 832")
+st.sidebar.write("**Device:** CUDA:0")
+st.sidebar.write(f"**GPU:** {GPU_NAME}")
 # HEADER
-st.title(
-    "Military Aircraft Detection"
-)
-st.markdown(
-    """
-    ### YOLOv8 Aircraft Detection & Explainability
-
+st.title("Military Aircraft Detection")
+st.markdown(""" ### YOLOv8 Aircraft Detection & Explainability
     Upload an aircraft image to detect and classify aircraft
     using the trained YOLOv8s model. An **EigenCAM heatmap**
     is generated below the detection result to visualize
@@ -129,7 +93,7 @@ st.markdown(
     """
 )
 st.divider()
-# IMAGE UPLOAD
+# IMAGE UPLOAD 
 st.subheader(
     "Upload Aircraft Image"
 )
