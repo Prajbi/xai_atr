@@ -1,3 +1,153 @@
+import streamlit as st
+from PIL import Image
+import pandas as pd
+import base64
+import os
+import datetime
+import cv2
+import numpy as np
+import torch
+from utils_8 import AircraftClassifier, ShipClassifier
+
+
+after 
+save_results_logic() and before # --- 3. APPLY STYLES IMMEDIATELY ---:
+
+def generate_eigencam(yolo_model, image_rgb, imgsz=832):
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA GPU is required for EigenCAM.")
+
+    device = torch.device("cuda:0")
+    pytorch_model = yolo_model.model
+    pytorch_model.to(device)
+    pytorch_model.eval()
+
+    activation = []
+
+    def forward_hook(module, inputs, output):
+        if isinstance(output, (tuple, list)):
+            output = output[0]
+        if torch.is_tensor(output) and output.ndim == 4:
+            activation.append(output.detach())
+
+    target_layer = None
+
+    for layer in reversed(list(pytorch_model.model[:-1])):
+        if isinstance(layer, torch.nn.Module):
+            if hasattr(layer, "conv") or isinstance(layer, torch.nn.Conv2d):
+                target_layer = layer
+                break
+
+    if target_layer is None:
+        raise RuntimeError("Could not find a suitable convolutional feature layer for EigenCAM.")
+
+    hook = target_layer.register_forward_hook(forward_hook)
+
+    try:
+        resized = cv2.resize(image_rgb, (imgsz, imgsz), interpolation=cv2.INTER_LINEAR)
+        tensor = torch.from_numpy(resized).permute(2, 0, 1).float() / 255.0
+        tensor = tensor.unsqueeze(0).to(device)
+
+        with torch.no_grad():
+            pytorch_model(tensor)
+
+        if not activation:
+            raise RuntimeError("No spatial feature activation was captured.")
+
+        features = activation[-1]
+
+        if features.ndim != 4:
+            raise RuntimeError(f"Unexpected activation shape: {features.shape}")
+
+        features = features[0].float()
+        channels, height, width = features.shape
+
+        features = features.reshape(channels, height * width)
+        features = features.transpose(0, 1)
+        features = features - features.mean(dim=0, keepdim=True)
+
+        try:
+            _, _, vh = torch.linalg.svd(features, full_matrices=False)
+            principal_component = vh[0]
+        except RuntimeError:
+            covariance = features.T @ features
+            _, eigenvectors = torch.linalg.eigh(covariance)
+            principal_component = eigenvectors[:, -1]
+
+        cam = features @ principal_component
+        cam = cam.reshape(height, width)
+        cam = cam.detach().cpu().numpy()
+
+        cam = np.abs(cam)
+        cam -= cam.min()
+
+        maximum = cam.max()
+        if maximum > 0:
+            cam /= maximum
+
+        cam = cv2.resize(cam, (image_rgb.shape[1], image_rgb.shape[0]), interpolation=cv2.INTER_LINEAR)
+
+        heatmap = np.uint8(cam * 255)
+        heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+        heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
+
+        image_float = image_rgb.astype(np.float32)
+        heatmap_float = heatmap.astype(np.float32)
+
+        overlay = 0.55 * image_float + 0.45 * heatmap_float
+        overlay = np.clip(overlay, 0, 255).astype(np.uint8)
+
+        return heatmap, overlay
+
+    finally:
+        hook.remove()
+
+
+
+
+
+original_image = Image.open(uploaded_file).convert('RGB')
+annotated_image = active_model.get_annotated_image(original_image)
+detections = active_model.predict(original_image)
+
+after this 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 import os
 import cv2
 import numpy as np

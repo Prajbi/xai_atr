@@ -145,7 +145,7 @@ for image_number, uploaded_file in enumerate(uploaded_files, start=1):
             confidence_score = float(boxes.conf[i].item())
             x1, y1, x2, y2 = boxes.xyxy[i].tolist()
             class_name = model.names[class_id]
-            detections.append({"Image":uploaded_file.name,"Class  ID":class_id,"Aircraft":class_name,"Confidence":confidence_score,"X1":round(x1,2),
+            detections.append({"Image":uploaded_file.name,"ClassID":class_id,"Aircraft":class_name,"Confidence":confidence_score,"X1":round(x1,2),
             "Y1":round(y1,2),"X2":round(x2,2),"Y2":round(y2,2)})
     df = pd.DataFrame(detections)
     all_detections.extend(detections)
@@ -154,53 +154,53 @@ for image_number, uploaded_file in enumerate(uploaded_files, start=1):
     col1, col2 = st.columns(2, gap="large") #OP
     with col1:
         st.markdown("### Original Image")
-        st.image(image, use_container_width=True)
+        st.image(image,width=800)
     with col2:
         st.markdown("### YOLOv8 Detection")
-        st.image(annotated_rgb, use_container_width=True)
+        st.image(annotated_rgb,width=800)
 
-#EIGENCAM
-with st.spinner(f"Generating EigenCAM for {uploaded_file.name}..."):
-    try:
-        heatmap, overlay = generate_eigencam(model,image_np,imgsz=832)
-        cam_col1, cam_col2 = st.columns(2,gap="large")
-        with cam_col1:
-            st.markdown("### EigenCAM Heatmap")
-            st.image(heatmap,use_container_width=True)
-        with cam_col2:
+    #EIGENCAM
+    with st.spinner(f"Generating EigenCAM for {uploaded_file.name}..."):
+        try:
+            heatmap, overlay = generate_eigencam(model,image_np,imgsz=832)
             st.markdown("### EigenCAM Overlay")
-            st.image(overlay,use_container_width=True)
-    except Exception as e:
-        st.error(f"EigenCAM generation failed:\n\n{e}")
-        st.info("The YOLOv8 detection result above is still valid.")
-# DET SUM
-st.markdown("### Detection Summary")
-total_detections = len(detections)
-if total_detections > 0:
-    average_confidence = df["Confidence"].mean()
-    highest_confidence = df["Confidence"].max()
-    unique_aircraft = df["Aircraft"].nunique()
-else:
-    average_confidence = 0.0
-    highest_confidence = 0.0
-    unique_aircraft = 0
-metric1, metric2, metric3, metric4 = st.columns(4)
-with metric1:
-    st.metric("Total Detections",total_detections) 
-with metric2:
-    st.metric("Aircraft Types",unique_aircraft)
-with metric3:
-    st.metric("Average Confidence",f"{average_confidence:.2%}")
-with metric4:
-    st.metric("Highest Confidence",f"{highest_confidence:.2%}")
+            st.image(overlay,width=800)
+        except Exception as e:
+            st.error(f"EigenCAM generation failed:\n\n{e}")
+            st.info("The YOLOv8 detection result above is still valid.")
+    # DET SUM
+    st.markdown("### Detection Summary")
+    total_detections = len(detections)
+    if total_detections > 0:
+        average_confidence = df["Confidence"].mean()
+        highest_confidence = df["Confidence"].max()
+        unique_aircraft = df["Aircraft"].nunique()
+    else:
+        average_confidence = 0.0
+        highest_confidence = 0.0
+        unique_aircraft = 0
+    metric1, metric2, metric3, metric4 = st.columns(4)
+    with metric1:
+        st.metric("Total Detections",total_detections) 
+    with metric2:
+        st.metric("Aircraft Types",unique_aircraft)
+    with metric3:
+        st.metric("Average Confidence",f"{average_confidence:.2%}")
+    with metric4:
+        st.metric("Highest Confidence",f"{highest_confidence:.2%}")
+        
+     
+    # DETECTION DET
+    if total_detections > 0:
+        st.markdown("### Detection Details")
+        display_df = df[["Aircraft", "Confidence"]].copy()
+        display_df["Confidence"] = (display_df["Confidence"].map(lambda x: f"{x:.2%}"))
+        st.dataframe(display_df,use_container_width=True,hide_index=False)
+    else:
+        st.info("No aircraft detected above the selected confidence threshold.")
+    st.divider()
     
-  
-# DETECTION DET
-if total_detections > 0:
-    st.markdown("### Detection Details")
-    display_df = df[["Aircraft", "Confidence"]].copy()
-    display_df["Confidence"] = (display_df["Confidence"].map(lambda x: f"{x:.2%}"))
-    st.dataframe(display_df,use_container_width=True,hide_index=False)
-else:
-    st.info("No aircraft detected above the selected confidence threshold.")
-st.divider()
+    
+
+
+
