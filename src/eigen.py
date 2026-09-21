@@ -17,13 +17,12 @@ PROJECT_ROOT = Path("/home/admin1/Abishek-Intern/new_atr")
 
 WEIGHTS = (
     PROJECT_ROOT
-    / "runs"
-    / "yolov8s_832_350plus"
-    / "weights"
-    / "best.pt"
+    / "new"
+    / "models"
+    / "yolo_aircraft.pt"
 )
 
-OUT_DIR = PROJECT_ROOT / "outputs" / "eigencam1"
+OUT_DIR = PROJECT_ROOT / "outputs" / "eigencam_new"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 

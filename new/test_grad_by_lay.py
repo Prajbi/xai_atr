@@ -7,6 +7,8 @@ import streamlit as st
 import torch
 from PIL import Image
 from ultralytics import YOLO
+from pytorch_grad_cam import GradCAM
+from pytorch_grad_cam.utils.image import show_cam_on_image
 #PAGE CONFIG
 st.set_page_config(page_title="Aircraft Detection Dashboard", page_icon="✈️", layout="wide", initial_sidebar_state="expanded")
 
@@ -35,6 +37,21 @@ st.sidebar.title("Detection Settings")
 st.sidebar.markdown("### Confidence Threshold")
 confidence = st.sidebar.slider("Confidence",min_value=0.01,max_value=1.00,value=0.25,step=0.01)
 st.sidebar.divider()
+st.sidebar.markdown("### GradCAM Settings")
+num_layers = len(model.model.model)
+cam_layer_idx = st.sidebar.slider(
+    "Target Layer Index",
+    min_value=-num_layers,
+    max_value=-1,
+    value=-2,
+    step=1,
+    help="Layer of the network to compute GradCAM on. Layers close to the "
+         "detection head (near -1) tend to look flat/uniform. Backbone or "
+         "SPPF layers (further negative, e.g. -9 to -6) usually give a "
+         "sharper, more localized heatmap. Try a few values.",
+)
+eigen_smooth = st.sidebar.checkbox("Eigen Smooth", value=True, help="Applies extra smoothing to reduce noise in the CAM.")
+st.sidebar.divider()
 st.sidebar.markdown("### Model Information")
 st.sidebar.info("GPU-only inference")
 st.sidebar.write(f"**Model:** `{MODEL_PATH.name}`")
@@ -42,14 +59,12 @@ st.sidebar.write("**Architecture:** YOLOv8s")
 st.sidebar.write("**Task:** Object Detection")
 if hasattr(model, "names"):
     st.sidebar.write(f"**Number of Classes:** {len(model.names)}")
-st.sidebar.write("**Input Size:** 832 × 832")
-st.sidebar.write("**Device:** CUDA:0")
 st.sidebar.write(f"**GPU:** {GPU_NAME}")
 
 #HEADER 
 st.title("Military Aircraft Detection")
 st.markdown("""Upload one or multiple aircraft images to detect and classify aircraft using the trained YOLOv8s model.
-An **EigenCAM heatmap** is generated for each image to visualize the regions that strongly activate the model.""")
+A **GradCAM heatmap** is generated for each image to visualize the regions that strongly activate the model.""")
 
 st.divider()
 
@@ -60,71 +75,58 @@ if not uploaded_files:
     st.info("Upload one or more aircraft images to start detection.")
     st.stop()
 
-#EIGENCAM FUNC
-def generate_eigencam(yolo_model, image_rgb, imgsz=832):
-    if not torch.cuda.is_available():
-        raise RuntimeError("CUDA GPU is required for EigenCAM.")
-    device = torch.device("cuda:0")
-    pytorch_model = yolo_model.model
-    pytorch_model.to(device)
-    pytorch_model.eval()
-    activation = []
-    def forward_hook(module, inputs, output):
+#GRADCAM FUNC
+class YoloCamWrapper(torch.nn.Module):
+    def __init__(self, yolo_model):
+        super().__init__()
+        self.model = yolo_model.model
+
+    def forward(self, x):
+        output = self.model(x)
         if isinstance(output, (tuple, list)):
-            output = output[0]
-        if torch.is_tensor(output) and output.ndim == 4:
-            activation.append(output.detach())
-    target_layer = None
-    for layer in reversed(list(pytorch_model.model[:-1])):
-        if isinstance(layer, torch.nn.Module):
-            if hasattr(layer, "conv") or isinstance(layer, torch.nn.Conv2d):
-                target_layer = layer
-                break
-    if target_layer is None:
-        raise RuntimeError("Could not find a suitable convolutional feature layer for EigenCAM.")
-    hook = target_layer.register_forward_hook(forward_hook)
-    try:
-        resized = cv2.resize(image_rgb, (imgsz, imgsz), interpolation=cv2.INTER_LINEAR)
-        tensor = torch.from_numpy(resized).permute(2, 0, 1).float() / 255.0
-        tensor = tensor.unsqueeze(0).to(device)
-        with torch.no_grad():
-            pytorch_model(tensor)
-        if not activation:
-            raise RuntimeError("No spatial feature activation was captured.")
-        features = activation[-1]
-        if features.ndim != 4:
-            raise RuntimeError(f"Unexpected activation shape: {features.shape}")
-        features = features[0].float()
-        channels, height, width = features.shape
-        features = features.reshape(channels, height * width)
-        features = features.transpose(0, 1)
-        features = features - features.mean(dim=0, keepdim=True)
-        try:
-            _, _, vh = torch.linalg.svd(features, full_matrices=False)
-            principal_component = vh[0]
-        except RuntimeError:
-            covariance = features.T @ features
-            _, eigenvectors = torch.linalg.eigh(covariance)
-            principal_component = eigenvectors[:, -1]
-        cam = features @ principal_component
-        cam = cam.reshape(height, width)
-        cam = cam.detach().cpu().numpy()
-        cam = np.abs(cam)
-        cam -= cam.min()
-        maximum = cam.max()
-        if maximum > 0:
-            cam /= maximum
-        cam = cv2.resize(cam, (image_rgb.shape[1], image_rgb.shape[0]), interpolation=cv2.INTER_LINEAR)
-        heatmap = np.uint8(cam * 255)
-        heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
-        heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
-        image_float = image_rgb.astype(np.float32)
-        heatmap_float = heatmap.astype(np.float32)
-        overlay = 0.55 * image_float + 0.45 * heatmap_float
-        overlay = np.clip(overlay, 0, 255).astype(np.uint8)
-        return heatmap, overlay
-    finally:
-        hook.remove()
+            return output[0]
+        return output
+
+class YoloCamTarget:
+    #generic detection target: sums the raw prediction tensor so GradCAM
+    #has a scalar to backprop from without needing a specific class/box
+    def __call__(self, model_output):
+        return model_output.sum()
+
+def generate_gradcam(yolo_model, image_rgb, imgsz=832, target_layer_idx=-4, eigen_smooth=True):
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA GPU is required for GradCAM.")
+    device = torch.device("cuda:0")
+    wrapped = YoloCamWrapper(yolo_model)
+    wrapped = wrapped.to(device)
+    wrapped.eval()
+    target_layer = wrapped.model.model[target_layer_idx]
+    target_layers = [target_layer]
+
+    #LETTERBOX RESIZE (preserve aspect ratio, matches YOLO's own preprocessing;
+    #a plain squash-resize distorts spatial features and flattens the CAM)
+    orig_h, orig_w = image_rgb.shape[:2]
+    scale = imgsz / max(orig_h, orig_w)
+    new_h, new_w = int(round(orig_h * scale)), int(round(orig_w * scale))
+    resized = cv2.resize(image_rgb, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+    canvas = np.full((imgsz, imgsz, 3), 114, dtype=np.uint8)
+    pad_top = (imgsz - new_h) // 2
+    pad_left = (imgsz - new_w) // 2
+    canvas[pad_top:pad_top + new_h, pad_left:pad_left + new_w] = resized
+
+    rgb_float = canvas.astype(np.float32) / 255.0
+    tensor = torch.from_numpy(rgb_float).permute(2, 0, 1).unsqueeze(0)
+    tensor = tensor.float().to(device)
+    tensor.requires_grad_(True)
+    with GradCAM(model=wrapped, target_layers=target_layers) as cam:
+        grayscale_cam = cam(input_tensor=tensor, targets=[YoloCamTarget()], eigen_smooth=eigen_smooth)
+    grayscale_cam = grayscale_cam[0]
+    visualization = show_cam_on_image(rgb_float, grayscale_cam, use_rgb=True)
+
+    #CROP OUT LETTERBOX PADDING, THEN RESIZE BACK TO ORIGINAL IMAGE SIZE
+    visualization = visualization[pad_top:pad_top + new_h, pad_left:pad_left + new_w]
+    visualization = cv2.resize(visualization, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
+    return visualization
 
 #PROCESS IMG
 st.divider()
@@ -159,14 +161,14 @@ for image_number, uploaded_file in enumerate(uploaded_files, start=1):
         st.markdown("### YOLOv8 Detection")
         st.image(annotated_rgb,width=800)
 
-    #EIGENCAM
-    with st.spinner(f"Generating EigenCAM for {uploaded_file.name}..."):
+    #GRADCAM
+    with st.spinner(f"Generating GradCAM for {uploaded_file.name}..."):
         try:
-            heatmap, overlay = generate_eigencam(model,image_np,imgsz=832)
-            st.markdown("### EigenCAM Overlay")
+            overlay = generate_gradcam(model,image_np,imgsz=832,target_layer_idx=cam_layer_idx,eigen_smooth=eigen_smooth)
+            st.markdown("### GradCAM Overlay")
             st.image(overlay,width=800)
         except Exception as e:
-            st.error(f"EigenCAM generation failed:\n\n{e}")
+            st.error(f"GradCAM generation failed:\n\n{e}")
             st.info("The YOLOv8 detection result above is still valid.")
     # DET SUM
     st.markdown("### Detection Summary")
@@ -199,8 +201,3 @@ for image_number, uploaded_file in enumerate(uploaded_files, start=1):
     else:
         st.info("No aircraft detected above the selected confidence threshold.")
     st.divider()
-    
-    
-
-
-

@@ -7,6 +7,8 @@ import streamlit as st
 import torch
 from PIL import Image
 from ultralytics import YOLO
+from pytorch_grad_cam import EigenCAM
+from pytorch_grad_cam.utils.image import show_cam_on_image
 #PAGE CONFIG
 st.set_page_config(page_title="Aircraft Detection Dashboard", page_icon="✈️", layout="wide", initial_sidebar_state="expanded")
 
@@ -42,8 +44,6 @@ st.sidebar.write("**Architecture:** YOLOv8s")
 st.sidebar.write("**Task:** Object Detection")
 if hasattr(model, "names"):
     st.sidebar.write(f"**Number of Classes:** {len(model.names)}")
-st.sidebar.write("**Input Size:** 832 × 832")
-st.sidebar.write("**Device:** CUDA:0")
 st.sidebar.write(f"**GPU:** {GPU_NAME}")
 
 #HEADER 
@@ -61,70 +61,37 @@ if not uploaded_files:
     st.stop()
 
 #EIGENCAM FUNC
+class YoloEigenCamWrapper(torch.nn.Module):
+    def __init__(self, yolo_model):
+        super().__init__()
+        self.model = yolo_model.model
+
+    def forward(self, x):
+        output = self.model(x)
+        if isinstance(output, (tuple, list)):
+            return output[0]
+        return output
+
 def generate_eigencam(yolo_model, image_rgb, imgsz=832):
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA GPU is required for EigenCAM.")
     device = torch.device("cuda:0")
-    pytorch_model = yolo_model.model
-    pytorch_model.to(device)
-    pytorch_model.eval()
-    activation = []
-    def forward_hook(module, inputs, output):
-        if isinstance(output, (tuple, list)):
-            output = output[0]
-        if torch.is_tensor(output) and output.ndim == 4:
-            activation.append(output.detach())
-    target_layer = None
-    for layer in reversed(list(pytorch_model.model[:-1])):
-        if isinstance(layer, torch.nn.Module):
-            if hasattr(layer, "conv") or isinstance(layer, torch.nn.Conv2d):
-                target_layer = layer
-                break
-    if target_layer is None:
-        raise RuntimeError("Could not find a suitable convolutional feature layer for EigenCAM.")
-    hook = target_layer.register_forward_hook(forward_hook)
-    try:
-        resized = cv2.resize(image_rgb, (imgsz, imgsz), interpolation=cv2.INTER_LINEAR)
-        tensor = torch.from_numpy(resized).permute(2, 0, 1).float() / 255.0
-        tensor = tensor.unsqueeze(0).to(device)
-        with torch.no_grad():
-            pytorch_model(tensor)
-        if not activation:
-            raise RuntimeError("No spatial feature activation was captured.")
-        features = activation[-1]
-        if features.ndim != 4:
-            raise RuntimeError(f"Unexpected activation shape: {features.shape}")
-        features = features[0].float()
-        channels, height, width = features.shape
-        features = features.reshape(channels, height * width)
-        features = features.transpose(0, 1)
-        features = features - features.mean(dim=0, keepdim=True)
-        try:
-            _, _, vh = torch.linalg.svd(features, full_matrices=False)
-            principal_component = vh[0]
-        except RuntimeError:
-            covariance = features.T @ features
-            _, eigenvectors = torch.linalg.eigh(covariance)
-            principal_component = eigenvectors[:, -1]
-        cam = features @ principal_component
-        cam = cam.reshape(height, width)
-        cam = cam.detach().cpu().numpy()
-        cam = np.abs(cam)
-        cam -= cam.min()
-        maximum = cam.max()
-        if maximum > 0:
-            cam /= maximum
-        cam = cv2.resize(cam, (image_rgb.shape[1], image_rgb.shape[0]), interpolation=cv2.INTER_LINEAR)
-        heatmap = np.uint8(cam * 255)
-        heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
-        heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
-        image_float = image_rgb.astype(np.float32)
-        heatmap_float = heatmap.astype(np.float32)
-        overlay = 0.55 * image_float + 0.45 * heatmap_float
-        overlay = np.clip(overlay, 0, 255).astype(np.uint8)
-        return heatmap, overlay
-    finally:
-        hook.remove()
+    wrapped = YoloEigenCamWrapper(yolo_model)
+    wrapped = wrapped.to(device)
+    wrapped.eval()
+    target_layer_idx = -4
+    target_layer = wrapped.model.model[target_layer_idx]
+    target_layers = [target_layer]
+    resized = cv2.resize(image_rgb, (imgsz, imgsz), interpolation=cv2.INTER_LINEAR)
+    rgb_float = resized.astype(np.float32) / 255.0
+    tensor = torch.from_numpy(rgb_float).permute(2, 0, 1).unsqueeze(0)
+    tensor = tensor.float().to(device)
+    with EigenCAM(model=wrapped, target_layers=target_layers) as cam:
+        grayscale_cam = cam(input_tensor=tensor, targets=None)
+    grayscale_cam = grayscale_cam[0]
+    visualization = show_cam_on_image(rgb_float, grayscale_cam, use_rgb=True)
+    visualization = cv2.resize(visualization, (image_rgb.shape[1], image_rgb.shape[0]), interpolation=cv2.INTER_LINEAR)
+    return visualization
 
 #PROCESS IMG
 st.divider()
@@ -162,7 +129,7 @@ for image_number, uploaded_file in enumerate(uploaded_files, start=1):
     #EIGENCAM
     with st.spinner(f"Generating EigenCAM for {uploaded_file.name}..."):
         try:
-            heatmap, overlay = generate_eigencam(model,image_np,imgsz=832)
+            overlay = generate_eigencam(model,image_np,imgsz=832)
             st.markdown("### EigenCAM Overlay")
             st.image(overlay,width=800)
         except Exception as e:
@@ -199,8 +166,3 @@ for image_number, uploaded_file in enumerate(uploaded_files, start=1):
     else:
         st.info("No aircraft detected above the selected confidence threshold.")
     st.divider()
-    
-    
-
-
-

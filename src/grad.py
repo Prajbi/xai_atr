@@ -1,695 +1,394 @@
-from pathlib import Path
-
+import os
+import glob
 import cv2
 import numpy as np
 import torch
-
 from ultralytics import YOLO
 from pytorch_grad_cam import GradCAM
 from pytorch_grad_cam.utils.image import show_cam_on_image
 
+IMAGE_DIR="/home/admin1/Abishek-Intern/new_atr/data/newdata/test/images"
+OUTPUT_DIR="/home/admin1/Abishek-Intern/new_atr/data/newdata/test/images/gradcam_m"
+MODEL_WEIGHTS_PATH="/home/admin1/Abishek-Intern/new_atr/new/models/yolo_aircraft.pt"
 
-# ============================================================
-# PATHS
-# ============================================================
+os.makedirs(OUTPUT_DIR,exist_ok=True)
 
-PROJECT_ROOT = Path("/home/admin1/Abishek-Intern/new_atr")
+device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-WEIGHTS = (
-    PROJECT_ROOT
-    / "runs"
-    / "yolov8s_832_350plus"
-    / "weights"
-    / "best.pt"
-)
+#LOAD MODEL
+model=YOLO(MODEL_WEIGHTS_PATH).to(device)
+pure_pytorch_model=model.model
+pure_pytorch_model.eval()
 
-TEST_DIR = (
-    PROJECT_ROOT
-    / "data"
-    / "filtered_350"
-    / "images"
-    / "test"
-)
+#ENABLE GRADIENTS
+for param in pure_pytorch_model.parameters():
+	param.requires_grad=True
 
-OUT_DIR = (
-    PROJECT_ROOT
-    / "outputs"
-    / "gradcam"
-)
+torch.set_grad_enabled(True)
 
-OUT_DIR.mkdir(
-    parents=True,
-    exist_ok=True
-)
+target_layers=[pure_pytorch_model.model[-4]]
 
 
-# ============================================================
-# SETTINGS
-# ============================================================
-
-IMAGE_SIZE = 832
-
-CONF = 0.05
-
-DEVICE = (
-    "cuda:0"
-    if torch.cuda.is_available()
-    else "cpu"
-)
-
-
-# ============================================================
-# YOLO WRAPPER
-# ============================================================
-
+#CAM WRAPPER
 class YoloGradCAMWrapper(torch.nn.Module):
 
-    def __init__(self, yolo_model):
+	def __init__(self,yolo_model):
+		super().__init__()
+		self.model=yolo_model
 
-        super().__init__()
+	def forward(self,x):
 
-        self.model = yolo_model.model
+		output=self.model(x)
 
-    def forward(self, x):
+		if not isinstance(output,(tuple,list)):
+			raise RuntimeError(
+				f"Unexpected model output type: {type(output)}"
+			)
 
-        # DO NOT use torch.no_grad().
-        # GradCAM needs gradients.
+		if len(output)<2:
+			raise RuntimeError(
+				"Expected YOLO output with prediction and head data"
+			)
 
-        output = self.model(x)
+		predictions=output[0]
+		head_outputs=output[1]
 
-        if isinstance(output, (tuple, list)):
+		print("\n========== MODEL OUTPUT ==========")
 
-            output = output[0]
+		print(
+			"FINAL OUTPUT:",
+			predictions.shape,
+			predictions.requires_grad
+		)
 
-        return output
+		print(
+			"HEAD OUTPUT KEYS:",
+			list(head_outputs.keys())
+		)
+
+		one2many=head_outputs["one2many"]
+
+		print(
+			"ONE2MANY KEYS:",
+			list(one2many.keys())
+		)
+
+		boxes=one2many["boxes"]
+		scores=one2many["scores"]
+		feats=one2many["feats"]
+
+		print(
+			"BOXES TYPE:",
+			type(boxes)
+		)
+
+		print(
+			"SCORES TYPE:",
+			type(scores)
+		)
+
+		print(
+			"FEATS TYPE:",
+			type(feats)
+		)
+
+		if torch.is_tensor(boxes):
+
+			print(
+				"BOXES SHAPE:",
+				boxes.shape,
+				"REQUIRES_GRAD:",
+				boxes.requires_grad
+			)
+
+		if torch.is_tensor(scores):
+
+			print(
+				"SCORES SHAPE:",
+				scores.shape,
+				"REQUIRES_GRAD:",
+				scores.requires_grad
+			)
+
+		if isinstance(feats,(list,tuple)):
+
+			print(
+				"NUMBER OF FEATS:",
+				len(feats)
+			)
+
+			for i,feat in enumerate(feats):
+
+				if torch.is_tensor(feat):
+
+					print(
+						"FEAT",
+						i,
+						"SHAPE:",
+						feat.shape,
+						"REQUIRES_GRAD:",
+						feat.requires_grad,
+						"GRAD_FN:",
+						feat.grad_fn
+					)
+
+				else:
+
+					print(
+						"FEAT",
+						i,
+						"TYPE:",
+						type(feat)
+					)
+
+		elif torch.is_tensor(feats):
+
+			print(
+				"FEATS SHAPE:",
+				feats.shape,
+				"REQUIRES_GRAD:",
+				feats.requires_grad,
+				"GRAD_FN:",
+				feats.grad_fn
+			)
+
+		#USE DIFFERENTIABLE SCORES IF AVAILABLE
+		if torch.is_tensor(scores):
+
+			print(
+				"USING ONE2MANY SCORES"
+			)
+
+			return scores
+
+		#FALLBACK
+		return predictions
 
 
-# ============================================================
-# IMAGE LOADING
-# ============================================================
-
-def load_image(path):
-
-    img = cv2.imread(
-        str(path)
-    )
-
-    if img is None:
-
-        raise FileNotFoundError(
-            f"Could not read image:\n{path}"
-        )
-
-    img = cv2.cvtColor(
-        img,
-        cv2.COLOR_BGR2RGB
-    )
-
-    img = cv2.resize(
-        img,
-        (IMAGE_SIZE, IMAGE_SIZE)
-    )
-
-    rgb_float = (
-        img.astype(np.float32)
-        / 255.0
-    )
-
-    tensor = torch.from_numpy(
-        rgb_float
-    )
-
-    tensor = tensor.permute(
-        2,
-        0,
-        1
-    )
-
-    tensor = tensor.unsqueeze(0)
-
-    tensor = tensor.float()
-
-    return rgb_float, tensor
-
-
-# ============================================================
-# YOLO DETECTION TARGET
-# ============================================================
-
+#TARGET
 class YoloDetectionTarget:
 
-    """
-    Differentiable target for YOLOv8 detection output.
+	def __call__(self,model_output):
 
-    YOLOv8 output for this model is:
+		print("\n========== TARGET ==========")
 
-        [25, 14196]
+		print(
+			"TARGET TYPE:",
+			type(model_output)
+		)
 
-    where:
+		print(
+			"TARGET SHAPE:",
+			model_output.shape
+		)
 
-        4   = bounding-box channels
-        21  = class channels
+		print(
+			"TARGET REQUIRES GRAD:",
+			model_output.requires_grad
+		)
 
-    We use the strongest class activation as the scalar
-    GradCAM target.
-    """
+		if model_output.ndim==3:
 
-    def __call__(self, model_output):
+			model_output=model_output[0]
 
-        # ----------------------------------------------------
-        # Handle tuple/list
-        # ----------------------------------------------------
+		#SCORES
+		if model_output.ndim==2:
 
-        if isinstance(
-            model_output,
-            (tuple, list)
-        ):
+			target=model_output.max()
 
-            model_output = model_output[0]
+			print(
+				"TARGET SCORE:",
+				target.item()
+			)
 
+			print(
+				"TARGET REQUIRES GRAD:",
+				target.requires_grad
+			)
 
-        # ----------------------------------------------------
-        # Print shape for debugging
-        # ----------------------------------------------------
+			return target
 
-        if model_output.ndim != 2:
+		if model_output.ndim==1:
 
-            raise RuntimeError(
-                "Unexpected YOLO output shape: "
-                f"{model_output.shape}"
-            )
+			target=model_output.max()
 
+			print(
+				"TARGET SCORE:",
+				target.item()
+			)
 
-        # ----------------------------------------------------
-        # YOLOv8:
-        #
-        # [25, 14196]
-        #
-        # First 4 rows = box coordinates
-        # Remaining 21 rows = class predictions
-        # ----------------------------------------------------
+			print(
+				"TARGET REQUIRES GRAD:",
+				target.requires_grad
+			)
 
-        class_scores = model_output[4:, :]
+			return target
 
+		raise RuntimeError(
+			f"Unsupported target shape: {model_output.shape}"
+		)
 
-        # ----------------------------------------------------
-        # Select strongest class activation
-        # ----------------------------------------------------
 
-        target = class_scores.max()
+#WRAPPER
+wrapped=YoloGradCAMWrapper(
+	pure_pytorch_model
+)
 
 
-        # ----------------------------------------------------
-        # Make sure it is scalar
-        # ----------------------------------------------------
+#CAM
+cam=GradCAM(
+	model=wrapped,
+	target_layers=target_layers
+)
 
-        target = target.squeeze()
 
+#IMAGE LIST
+image_paths=glob.glob(
+	os.path.join(IMAGE_DIR,"*.jpg")
+)
 
-        return target
+image_paths+=glob.glob(
+	os.path.join(IMAGE_DIR,"*.jpeg")
+)
 
+image_paths+=glob.glob(
+	os.path.join(IMAGE_DIR,"*.png")
+)
 
-# ============================================================
-# DRAW DETECTIONS
-# ============================================================
+print("Found",len(image_paths))
 
-def draw_detections(
-    image,
-    result
-):
+#PROCESS FIRST 5
+image_paths=image_paths[:5]
 
-    annotated = image.copy()
 
-    if (
-        result.boxes is None
-        or len(result.boxes) == 0
-    ):
+for index,image_path in enumerate(image_paths):
 
-        return annotated
+	print(
+		f"\nProcessing [{index+1}/{len(image_paths)}]: "
+		f"{os.path.basename(image_path)}"
+	)
 
-
-    for box in result.boxes:
-
-        cls_id = int(
-            box.cls.item()
-        )
-
-        confidence = float(
-            box.conf.item()
-        )
-
-        name = result.names[
-            cls_id
-        ]
-
-        x1, y1, x2, y2 = (
-            box.xyxy[0]
-            .cpu()
-            .numpy()
-            .astype(int)
-        )
-
-
-        # ----------------------------------------------------
-        # Bounding box
-        # ----------------------------------------------------
-
-        cv2.rectangle(
-            annotated,
-            (x1, y1),
-            (x2, y2),
-            (255, 255, 255),
-            2
-        )
-
-
-        # ----------------------------------------------------
-        # Label
-        # ----------------------------------------------------
-
-        label = (
-            f"{name} "
-            f"{confidence:.2f}"
-        )
-
-        cv2.putText(
-            annotated,
-            label,
-            (x1, max(20, y1 - 5)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            (255, 255, 255),
-            2,
-            cv2.LINE_AA
-        )
-
-
-    return annotated
-
-
-# ============================================================
-# RUN GRADCAM
-# ============================================================
-
-def run_gradcam(
-    image_path,
-    yolo
-):
-
-    # --------------------------------------------------------
-    # YOLO DETECTION
-    # --------------------------------------------------------
-
-    results = yolo.predict(
-        source=str(image_path),
-        imgsz=IMAGE_SIZE,
-        conf=CONF,
-        device=DEVICE,
-        verbose=False
-    )
-
-    result = results[0]
-
-
-    # --------------------------------------------------------
-    # PRINT DETECTIONS
-    # --------------------------------------------------------
-
-    print(
-        "\nDetections:"
-    )
-
-    if (
-        result.boxes is None
-        or len(result.boxes) == 0
-    ):
-
-        print(
-            "  No detections."
-        )
-
-    else:
-
-        for i, box in enumerate(
-            result.boxes
-        ):
-
-            cls_id = int(
-                box.cls.item()
-            )
-
-            confidence = float(
-                box.conf.item()
-            )
-
-            name = result.names[
-                cls_id
-            ]
-
-            print(
-                f"  {i + 1}. "
-                f"{name} "
-                f"confidence={confidence:.4f}"
-            )
-
-
-    # --------------------------------------------------------
-    # IMAGE
-    # --------------------------------------------------------
-
-    rgb_float, tensor = load_image(
-        image_path
-    )
-
-    tensor = tensor.to(
-        DEVICE
-    )
-
-
-    # --------------------------------------------------------
-    # WRAPPER
-    # --------------------------------------------------------
-
-    wrapped = YoloGradCAMWrapper(
-        yolo
-    )
-
-    wrapped = wrapped.to(
-        DEVICE
-    )
-
-    wrapped.eval()
-
-
-    # --------------------------------------------------------
-    # TARGET LAYER
-    # --------------------------------------------------------
-
-    target_layer_idx = -4
-
-    target_layer = (
-        wrapped.model.model[
-            target_layer_idx
-        ]
-    )
-
-    target_layers = [
-        target_layer
-    ]
-
-    print(
-        "\nTarget layer:"
-    )
-
-    print(
-        f"  model.model[{target_layer_idx}]"
-    )
-
-    print(
-        f"  {type(target_layer).__name__}"
-    )
-
-
-    # --------------------------------------------------------
-    # GRADCAM TARGET
-    # --------------------------------------------------------
-
-    targets = [
-        YoloDetectionTarget()
-    ]
-
-
-    # --------------------------------------------------------
-    # GRADCAM
-    # --------------------------------------------------------
-
-    print(
-        "\nGenerating GradCAM..."
-    )
-
-    with GradCAM(
-        model=wrapped,
-        target_layers=target_layers
-    ) as cam:
-
-        grayscale_cam = cam(
-            input_tensor=tensor,
-            targets=targets
-        )
-
-
-    grayscale_cam = (
-        grayscale_cam[0]
-    )
-
-
-    # --------------------------------------------------------
-    # CAM OVERLAY
-    # --------------------------------------------------------
-
-    cam_image = show_cam_on_image(
-        rgb_float,
-        grayscale_cam,
-        use_rgb=True
-    )
-
-
-    # --------------------------------------------------------
-    # DRAW YOLO DETECTIONS
-    # --------------------------------------------------------
-
-    annotated = draw_detections(
-        cam_image,
-        result
-    )
-
-
-    return (
-        annotated,
-        grayscale_cam,
-        result
-    )
-
-
-# ============================================================
-# MAIN
-# ============================================================
-
-def main():
-
-    print(
-        "\n========================================"
-    )
-
-    print(
-        "           YOLO GRADCAM"
-    )
-
-    print(
-        "========================================"
-    )
-
-    print(
-        f"\nWeights:\n{WEIGHTS}"
-    )
-
-    print(
-        f"\nTest directory:\n{TEST_DIR}"
-    )
-
-    print(
-        f"\nDevice:\n{DEVICE}"
-    )
-
-    print(
-        f"\nImage size:\n{IMAGE_SIZE}"
-    )
-
-    print(
-        f"\nConfidence:\n{CONF}"
-    )
-
-
-    # ========================================================
-    # CHECK PATHS
-    # ========================================================
-
-    if not WEIGHTS.exists():
-
-        raise FileNotFoundError(
-            f"\nWeights not found:\n{WEIGHTS}"
-        )
-
-
-    if not TEST_DIR.exists():
-
-        raise FileNotFoundError(
-            f"\nTest directory not found:\n{TEST_DIR}"
-        )
-
-
-    # ========================================================
-    # LOAD MODEL
-    # ========================================================
-
-    print(
-        "\nLoading YOLO model..."
-    )
-
-    yolo = YOLO(
-        WEIGHTS.as_posix()
-    )
-
-    print(
-        "Model loaded."
-    )
-
-
-    # ========================================================
-    # SAMPLE IMAGES
-    # ========================================================
-
-    sample_images = sorted(
-        TEST_DIR.glob("*.jpg")
-    )[:20]
-
-
-    if not sample_images:
-
-        raise FileNotFoundError(
-            f"\nNo JPG images found in:\n{TEST_DIR}"
-        )
-
-
-    print(
-        f"\nFound {len(sample_images)} "
-        f"sample images."
-    )
-
-
-    # ========================================================
-    # PROCESS
-    # ========================================================
-
-    successful = 0
-
-    for i, img_path in enumerate(
-        sample_images,
-        start=1
-    ):
-
-        print(
-            "\n----------------------------------------"
-        )
-
-        print(
-            f"[{i}/{len(sample_images)}] "
-            f"{img_path.name}"
-        )
-
-
-        try:
-
-            (
-                visualization,
-                cam_map,
-                result
-            ) = run_gradcam(
-                img_path,
-                yolo
-            )
-
-
-            # ------------------------------------------------
-            # SAVE VISUALIZATION
-            # ------------------------------------------------
-
-            output_path = (
-                OUT_DIR
-                / f"{img_path.stem}_gradcam.png"
-            )
-
-            cv2.imwrite(
-                str(output_path),
-                cv2.cvtColor(
-                    visualization,
-                    cv2.COLOR_RGB2BGR
-                )
-            )
-
-
-            # ------------------------------------------------
-            # SAVE RAW CAM
-            # ------------------------------------------------
-
-            cam_path = (
-                OUT_DIR
-                / f"{img_path.stem}_cam.npy"
-            )
-
-            np.save(
-                str(cam_path),
-                cam_map
-            )
-
-
-            print(
-                "\nSaved:"
-            )
-
-            print(
-                f"  {output_path}"
-            )
-
-            print(
-                f"  {cam_path}"
-            )
-
-
-            successful += 1
-
-
-        except Exception as e:
-
-            print(
-                "\nERROR:"
-            )
-
-            print(
-                f"  {type(e).__name__}: {e}"
-            )
-
-
-    # ========================================================
-    # SUMMARY
-    # ========================================================
-
-    print(
-        "\n========================================"
-    )
-
-    print(
-        "          GRADCAM COMPLETE"
-    )
-
-    print(
-        "========================================"
-    )
-
-    print(
-        f"\nSuccessful: "
-        f"{successful}/{len(sample_images)}"
-    )
-
-    print(
-        f"\nOutput directory:\n{OUT_DIR}"
-    )
-
-
-# ============================================================
-# ENTRY POINT
-# ============================================================
-
-if __name__ == "__main__":
-
-    main()
+	try:
+
+		#READ IMAGE
+		image=cv2.imread(image_path)
+
+		if image is None:
+
+			print(
+				"Could not read image"
+			)
+
+			continue
+
+		#BGR TO RGB
+		image_rgb=cv2.cvtColor(
+			image,
+			cv2.COLOR_BGR2RGB
+		)
+
+		#RESIZE
+		input_size=640
+
+		image_resized=cv2.resize(
+			image_rgb,
+			(input_size,input_size)
+		)
+
+		#NORMALIZE
+		input_image=image_resized.astype(
+			np.float32
+		)/255.0
+
+		#TENSOR
+		input_tensor=torch.from_numpy(
+			input_image
+		).permute(
+			2,
+			0,
+			1
+		).unsqueeze(
+			0
+		).to(device)
+
+		input_tensor.requires_grad_(True)
+
+		#CLEAR GRADIENTS
+		pure_pytorch_model.zero_grad(
+			set_to_none=True
+		)
+
+		#CAM
+		grayscale_cam=cam(
+			input_tensor=input_tensor,
+			targets=[
+				YoloDetectionTarget()
+			]
+		)
+
+		grayscale_cam=grayscale_cam[0]
+
+		print(
+			"\n========== CAM =========="
+		)
+
+		print(
+			"CAM MIN:",
+			grayscale_cam.min()
+		)
+
+		print(
+			"CAM MAX:",
+			grayscale_cam.max()
+		)
+
+		print(
+			"CAM MEAN:",
+			grayscale_cam.mean()
+		)
+
+		print(
+			"CAM STD:",
+			grayscale_cam.std()
+		)
+
+		#OVERLAY
+		visualization=show_cam_on_image(
+			input_image,
+			grayscale_cam,
+			use_rgb=True
+		)
+
+		#OUTPUT PATH
+		output_path=os.path.join(
+			OUTPUT_DIR,
+			os.path.splitext(
+				os.path.basename(image_path)
+			)[0]+"_gradcam.jpg"
+		)
+
+		#RGB TO BGR
+		visualization_bgr=cv2.cvtColor(
+			visualization,
+			cv2.COLOR_RGB2BGR
+		)
+
+		#SAVE
+		cv2.imwrite(
+			output_path,
+			visualization_bgr
+		)
+
+		print(
+			"Saved:",
+			output_path
+		)
+
+	except Exception as e:
+
+		print(
+			f"Error processing {image_path}: "
+			f"{type(e).__name__}: {e}"
+		)
+
+print("\nDone")

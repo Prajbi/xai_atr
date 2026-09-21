@@ -4,11 +4,11 @@ from ultralytics import YOLO
 
 PROJECT_ROOT = Path("/home/admin1/Abishek-Intern/new_atr")
 
-DATA_YAML = PROJECT_ROOT / "data/raw/yolo/data.yaml"
+DATA_YAML = PROJECT_ROOT / "data/yolo_aircraft_89/data.yaml"
 
 BEST_WEIGHTS = (
     PROJECT_ROOT
-    / "runs/yolov8s_testnew-7/weights/best.pt"
+    / "new/models/yolo_aircraft.pt"
 )
 
 
@@ -41,7 +41,7 @@ model = YOLO(BEST_WEIGHTS.as_posix())
 # Evaluate ONLY the untouched TEST set
 metrics = model.val(
     data=DATA_YAML.as_posix(),
-    split="test",
+    split="val",
 
     imgsz=640,
     batch=64,

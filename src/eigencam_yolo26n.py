@@ -13,16 +13,15 @@ from pytorch_grad_cam import EigenCAM
 # PATHS
 # ============================================================
 
-MODEL_PATH = "/home/admin1/Abishek-Intern/new_atr/runs/best.pt"
+MODEL_PATH = "/home/admin1/Abishek-Intern/new_atr/new/models/yolo_aircraft.pt"
 
 SOURCE_DIR = (
-    "/home/admin1/Abishek-Intern/new_atr/"
-    "data/balanced_800/images/test"
+    "/home/admin1/Abishek-Intern/new_atr/data/newdata/test/images"
 )
 
 OUTPUT_DIR = (
     "/home/admin1/Abishek-Intern/new_atr/"
-    "runs/eigencam_yolo26n_balanced800"
+    "runs/eigencamnew"
 )
 
 IMG_SIZE = 832
