@@ -66,7 +66,7 @@ for i,img_path in enumerate(image_path):
 		if img is None:
 			continue
 		h,w,_=img.shape
-		input_image=cv2.resize(img,(640,640)) #PREPROCESS AND RESIZE
+		input_image=cv2.resize(img,(842,)) #PREPROCESS AND RESIZE
 		input_image=input_img[:, :, ::-1].transpose(2,0,1)
 		input_image=np.ascontiguousarray(input_img,dtype=np.float32)/255.0
 		input_tensor=torch.from_numpy(input_img).unsqueeze(0).to(device)

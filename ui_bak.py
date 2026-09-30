@@ -14,7 +14,7 @@ st.set_page_config(page_title="Aircraft Detection Dashboard", page_icon="✈️"
 
 #PROJECT PATH
 PROJECT_ROOT = Path("/home/admin1/Abishek-Intern/new_atr")
-MODEL_PATH = PROJECT_ROOT / "new" / "models" / "yolo_aircraft.pt"
+MODEL_PATH = PROJECT_ROOT / "runs" / "yolov8s_832_targeted_aug" / "weights" / "best.pt"
 
 #GPU CHECK 
 if not torch.cuda.is_available():
@@ -72,7 +72,7 @@ class YoloEigenCamWrapper(torch.nn.Module):
         return output
 
 
-CAM_TARGET_LAYER_IDX = -2  #layer of the yolo backbone/neck used for CAM
+CAM_TARGET_LAYER_IDX = -2  #layer of the yolo for cam
 
 class YoloCamTarget:
     def __call__(self, model_output):
