@@ -14,8 +14,9 @@ st.set_page_config(page_title="Aircraft Detection Dashboard", page_icon="✈️"
 
 #PROJECT PATH
 PROJECT_ROOT = Path("/home/admin1/Abishek-Intern/new_atr")
-MODEL_PATH = PROJECT_ROOT / "models" / "yolov8s_832_targeted_aug" / "weights" / "best.pt"
+MODEL_PATH = PROJECT_ROOT / "best.pt"
 
+# / "models" / "yolov8s_832_targeted_aug" / "weights" / "best.pt"
 #GPU CHECK 
 if not torch.cuda.is_available():
     st.error("CUDA GPU is not available. This application is configured for GPU-only inference.")

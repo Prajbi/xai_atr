@@ -17,7 +17,7 @@ st.set_page_config(page_title="Aircraft Detection Dashboard", page_icon="✈️"
 
 # PROJECT PATH
 PROJECT_ROOT = Path("/home/admin1/Abishek-Intern/new_atr")
-MODEL_PATH = PROJECT_ROOT /"models" / "yolov8s_832_targeted_aug" / "weights" / "best.pt"
+MODEL_PATH = PROJECT_ROOT / "best.pt"
 #/ "main" /"models" / "yolo_aircraft.pt"
 #/"models" / "yolov8s_832_targeted_aug" / "weights" / "best.pt"
 # GPU CHECK
@@ -40,12 +40,8 @@ def load_model():
 model = load_model()
 
 # METHOD REGISTRY + AUTOMATIC LAYER CANDIDATES
-CAM_REGISTRY = {
-    "EigenCAM": EigenCAM, "EigenGradCAM": EigenGradCAM, "GradCAM": GradCAM,
-    "GradCAM++": GradCAMPlusPlus, "XGradCAM": XGradCAM, "HiResCAM": HiResCAM,
-    "LayerCAM": LayerCAM, "ScoreCAM": ScoreCAM, "AblationCAM": AblationCAM,
-}
-OTHER_METHODS = ["Saliency", "SmoothGrad", "IntegratedGradients", "Occlusion", "RISE"]
+CAM_REGISTRY = {"EigenCAM": EigenCAM,"XGradCAM": XGradCAM, }
+OTHER_METHODS = ["SmoothGrad","Occlusion"]
 ALL_METHODS = list(CAM_REGISTRY) + OTHER_METHODS
 DEFAULT_METHODS = [m for m in ALL_METHODS if m != "AblationCAM"]   # AblationCAM often fails on YOLO routing
 
