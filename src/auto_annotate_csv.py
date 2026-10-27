@@ -4,18 +4,23 @@ import cv2
 from ultralytics import YOLO
 
 # ============================================================
-# CONFIG
+# CONFIGURATION
 # ============================================================
 
-ROOT_DIR = Path("/home/admin1/Abishek-Intern/new_atr/aircrafts")
+ROOT_DIR = Path(
+    "/home/admin1/Abishek-Intern/new_atr/data/tejas"
+)
 
 MODEL_PATH = Path(
-    "/home/admin1/Abishek-Intern/new_atr/"
-    "models/yolov8s_832_balanced800/weights/best.pt"
+    "/home/admin1/Abishek-Intern/new_atr/main/models/yolo_aircraft.pt"
 )
 
 CONF_THRESHOLD = 0.25
 IOU_THRESHOLD = 0.50
+
+# Tejas class ID in the trained model.
+# VERIFY this ID against model.names before running.
+TEJAS_CLASS_ID = None
 
 IMAGE_EXTENSIONS = {
     ".jpg",
@@ -26,56 +31,80 @@ IMAGE_EXTENSIONS = {
 }
 
 # ============================================================
+# VALIDATE PATHS
+# ============================================================
+
+if not ROOT_DIR.is_dir():
+    raise FileNotFoundError(
+        f"Tejas image directory not found: {ROOT_DIR}"
+    )
+
+if not MODEL_PATH.is_file():
+    raise FileNotFoundError(
+        f"Model weights not found: {MODEL_PATH}"
+    )
+
+# ============================================================
 # LOAD MODEL
 # ============================================================
 
-print("\nLoading model:")
+print("\nLoading YOLO model:")
 print(MODEL_PATH)
 
 model = YOLO(str(MODEL_PATH))
 
-print("\nModel loaded.")
+print("\nModel loaded successfully.")
 
 # ============================================================
-# CLASS MAPPING
+# FIND TEJAS CLASS ID
 # ============================================================
 
-CLASS_IDS = {
-    "F2": 33,
-    "An225": 8,
-    "J35": 42,
-    "YF23": 98,
-    "EMB314": 27,
-    "An22": 7,
-    "Mi28": 61,
-    "Mi26": 60,
-    "Su47": 74,
-    "KF21": 50,
-    "KJ600": 52,
-    "TB2": 78,
-    "WZ7": 91,
-}
+print("\nModel class names:")
 
-# ============================================================
-# CHECK MODEL CLASSES
-# ============================================================
+for class_id, class_name in model.names.items():
+    print(f"ID {class_id:3d}: {class_name}")
 
-print("\nChecking model classes...")
+# Find Tejas by its name rather than guessing its ID.
+tejas_matches = [
+    class_id
+    for class_id, class_name in model.names.items()
+    if str(class_name).strip().lower() == "tejas"
+]
 
-for class_name, class_id in CLASS_IDS.items():
+if TEJAS_CLASS_ID is None:
 
-    if class_id not in model.names:
-        print(
-            f"WARNING: class ID {class_id} "
-            f"({class_name}) not found in model."
-        )
+    if len(tejas_matches) == 1:
+        TEJAS_CLASS_ID = tejas_matches[0]
+
     else:
-        model_name = model.names[class_id]
-
-        print(
-            f"{class_name:8s} -> ID {class_id:3d} "
-            f"-> model name: {model_name}"
+        raise ValueError(
+            "\nCould not uniquely identify the Tejas class in "
+            "model.names.\n"
+            "Check the class list printed above. If Tejas is "
+            "present under a different name, update the matching "
+            "logic to use its exact model name."
         )
+
+print(f"\nTejas class ID: {TEJAS_CLASS_ID}")
+print(f"Tejas model name: {model.names[TEJAS_CLASS_ID]}")
+
+# ============================================================
+# FIND IMAGES
+# ============================================================
+
+image_files = sorted(
+    path
+    for path in ROOT_DIR.iterdir()
+    if path.is_file()
+    and path.suffix.lower() in IMAGE_EXTENSIONS
+)
+
+if not image_files:
+    raise RuntimeError(
+        f"No images found in {ROOT_DIR}"
+    )
+
+print(f"\nTejas images found: {len(image_files)}")
 
 # ============================================================
 # STATISTICS
@@ -89,224 +118,159 @@ failed_images = 0
 total_boxes = 0
 
 # ============================================================
-# PROCESS EACH CLASS FOLDER
+# PROCESS IMAGES
 # ============================================================
 
-for class_dir in sorted(ROOT_DIR.iterdir()):
+for index, image_path in enumerate(image_files, start=1):
 
-    if not class_dir.is_dir():
-        continue
+    total_images += 1
 
-    class_name = class_dir.name
+    csv_path = image_path.with_suffix(".csv")
 
-    if class_name not in CLASS_IDS:
-        print(
-            f"\nSkipping unknown folder: {class_name}"
-        )
-        continue
-
-    target_class_id = CLASS_IDS[class_name]
-
-    print("\n" + "=" * 70)
-    print(f"CLASS: {class_name}")
-    print(f"CLASS ID: {target_class_id}")
-    print("=" * 70)
-
-    image_files = sorted(
-        [
-            p
-            for p in class_dir.iterdir()
-            if p.is_file()
-            and p.suffix.lower() in IMAGE_EXTENSIONS
-        ]
+    print(
+        f"[{index}/{len(image_files)}] "
+        f"{image_path.name}",
+        end=" "
     )
 
-    print(f"Images: {len(image_files)}")
+    # Do not overwrite existing annotations.
+    if csv_path.exists():
+        print("-> CSV already exists, skipping")
+        existing_csv += 1
+        continue
+
+    # Read image and determine dimensions.
+    image = cv2.imread(str(image_path))
+
+    if image is None:
+        print("-> FAILED TO READ IMAGE")
+        failed_images += 1
+        continue
+
+    height, width = image.shape[:2]
 
     # ========================================================
-    # PROCESS IMAGES
+    # YOLO PREDICTION
     # ========================================================
 
-    for index, image_path in enumerate(image_files, start=1):
-
-        total_images += 1
-
-        csv_path = image_path.with_suffix(".csv")
-
-        print(
-            f"[{index}/{len(image_files)}] "
-            f"{image_path.name}",
-            end=" "
+    try:
+        results = model.predict(
+            source=str(image_path),
+            conf=CONF_THRESHOLD,
+            iou=IOU_THRESHOLD,
+            verbose=False,
+            device=0
         )
 
-        # ----------------------------------------------------
-        # DO NOT OVERWRITE EXISTING CSV
-        # ----------------------------------------------------
+    except Exception as error:
+        print(f"-> PREDICTION ERROR: {error}")
+        failed_images += 1
+        continue
 
-        if csv_path.exists():
+    result = results[0]
+    boxes_to_save = []
 
-            print("→ CSV already exists, skipping")
+    # ========================================================
+    # FILTER TEJAS DETECTIONS
+    # ========================================================
 
-            existing_csv += 1
-            continue
+    if result.boxes is not None:
 
-        # ----------------------------------------------------
-        # READ IMAGE
-        # ----------------------------------------------------
+        for box in result.boxes:
 
-        image = cv2.imread(str(image_path))
+            class_id = int(box.cls[0])
+            confidence = float(box.conf[0])
 
-        if image is None:
+            # Keep only detections classified as Tejas.
+            if class_id != TEJAS_CLASS_ID:
+                continue
 
-            print("→ FAILED TO READ IMAGE")
+            x1, y1, x2, y2 = box.xyxy[0].tolist()
 
-            failed_images += 1
-            continue
+            # Clip coordinates to the image boundaries.
+            x1 = max(0, min(int(round(x1)), width - 1))
+            y1 = max(0, min(int(round(y1)), height - 1))
+            x2 = max(0, min(int(round(x2)), width - 1))
+            y2 = max(0, min(int(round(y2)), height - 1))
 
-        height, width = image.shape[:2]
+            # Ignore invalid boxes.
+            if x2 <= x1 or y2 <= y1:
+                continue
 
-        # ----------------------------------------------------
-        # YOLO PREDICTION
-        # ----------------------------------------------------
-
-        try:
-
-            results = model.predict(
-                source=str(image_path),
-                conf=CONF_THRESHOLD,
-                iou=IOU_THRESHOLD,
-                verbose=False,
-                device=0
+            boxes_to_save.append(
+                (x1, y1, x2, y2, confidence)
             )
 
-        except Exception as e:
+    # ========================================================
+    # HANDLE NO DETECTION
+    # ========================================================
 
-            print(f"→ ERROR: {e}")
+    if not boxes_to_save:
+        print("-> NO TEJAS DETECTION")
+        no_detection += 1
+        continue
 
-            failed_images += 1
-            continue
+    # ========================================================
+    # SAVE CSV
+    # ========================================================
 
-        result = results[0]
+    with open(
+        csv_path,
+        "w",
+        newline="",
+        encoding="utf-8"
+    ) as file:
 
-        boxes_to_save = []
+        writer = csv.writer(file)
 
-        # ----------------------------------------------------
-        # EXTRACT DETECTIONS
-        # ----------------------------------------------------
+        writer.writerow([
+            "filename",
+            "width",
+            "height",
+            "class",
+            "xmin",
+            "ymin",
+            "xmax",
+            "ymax",
+            "confidence"
+        ])
 
-        if result.boxes is not None:
-
-            for box in result.boxes:
-
-                cls_id = int(box.cls[0])
-                confidence = float(box.conf[0])
-
-                # Keep only expected folder class
-                if cls_id != target_class_id:
-                    continue
-
-                x1, y1, x2, y2 = box.xyxy[0].tolist()
-
-                # ------------------------------------------------
-                # CLAMP BOX TO IMAGE
-                # ------------------------------------------------
-
-                x1 = max(0, min(int(round(x1)), width - 1))
-                y1 = max(0, min(int(round(y1)), height - 1))
-                x2 = max(0, min(int(round(x2)), width - 1))
-                y2 = max(0, min(int(round(y2)), height - 1))
-
-                # Ignore invalid boxes
-                if x2 <= x1 or y2 <= y1:
-                    continue
-
-                boxes_to_save.append(
-                    (
-                        x1,
-                        y1,
-                        x2,
-                        y2,
-                        confidence
-                    )
-                )
-
-        # ----------------------------------------------------
-        # NO DETECTION
-        # ----------------------------------------------------
-
-        if not boxes_to_save:
-
-            print("→ NO DETECTION")
-
-            no_detection += 1
-            continue
-
-        # ----------------------------------------------------
-        # WRITE CSV
-        # ----------------------------------------------------
-
-        filename = image_path.stem
-
-        with open(
-            csv_path,
-            "w",
-            newline=""
-        ) as f:
-
-            writer = csv.writer(f)
+        for x1, y1, x2, y2, confidence in boxes_to_save:
 
             writer.writerow([
-                "filename",
-                "width",
-                "height",
-                "class",
-                "xmin",
-                "ymin",
-                "xmax",
-                "ymax"
-            ])
-
-            for (
+                image_path.stem,
+                width,
+                height,
+                "Tejas",
                 x1,
                 y1,
                 x2,
                 y2,
-                confidence
-            ) in boxes_to_save:
+                round(confidence, 6)
+            ])
 
-                writer.writerow([
-                    filename,
-                    width,
-                    height,
-                    class_name,
-                    x1,
-                    y1,
-                    x2,
-                    y2
-                ])
+    annotated_images += 1
+    total_boxes += len(boxes_to_save)
 
-        annotated_images += 1
-        total_boxes += len(boxes_to_save)
-
-        print(
-            f"→ SAVED "
-            f"{len(boxes_to_save)} box(es)"
-        )
+    print(
+        f"-> SAVED {len(boxes_to_save)} box(es)"
+    )
 
 # ============================================================
 # FINAL SUMMARY
 # ============================================================
 
 print("\n")
-print("=" * 70)
-print("AUTO-ANNOTATION COMPLETE")
-print("=" * 70)
+print("=" * 65)
+print("TEJAS AUTO-ANNOTATION COMPLETE")
+print("=" * 65)
 
 print(f"Total images checked : {total_images}")
 print(f"CSV files created    : {annotated_images}")
 print(f"Total boxes created  : {total_boxes}")
 print(f"Already had CSV      : {existing_csv}")
-print(f"No detection         : {no_detection}")
+print(f"No Tejas detection   : {no_detection}")
 print(f"Failed images        : {failed_images}")
 
-print("=" * 70)
+print("=" * 65)
+print(f"\nAnnotations saved alongside images in:\n{ROOT_DIR}")
