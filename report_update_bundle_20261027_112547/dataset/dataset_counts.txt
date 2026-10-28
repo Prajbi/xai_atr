@@ -1,0 +1,14 @@
+
+79-class dataset
+Path: /home/admin1/Abishek-Intern/new_atr/data/yolo_79class_balanced_aug/images
+train: 25069
+validation: 4606
+test: 1666
+Total across listed splits: 31341
+
+Raw YOLO dataset
+Path: /home/admin1/Abishek-Intern/new_atr/data/raw/yolo/images
+train: 17489
+val: 4295
+test: 1557
+Total across listed splits: 23341

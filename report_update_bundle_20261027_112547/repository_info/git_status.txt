@@ -1,0 +1,8 @@
+?? anchor_alignment_diagnostic.csv
+?? check_anchor_alignment.py
+?? collect_report_files.sh
+?? evaluate_xai.py
+?? report_update_bundle_20261027_112547/
+?? runs/detect/val-3/
+?? runs/xai_eval_50_20261027_110921/
+?? runs/xai_eval_50_20261027_111745/

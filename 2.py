@@ -8,8 +8,7 @@ import torch.nn.functional as F
 from pathlib import Path
 from PIL import Image
 from ultralytics import YOLO
-from pytorch_grad_cam import (EigenCAM, EigenGradCAM, GradCAM, GradCAMPlusPlus,
-                              XGradCAM, HiResCAM, LayerCAM, ScoreCAM, AblationCAM)
+from pytorch_grad_cam import EigenCAM, XGradCAM
 from pytorch_grad_cam.utils.image import show_cam_on_image
 
 # PAGE CONFIG
@@ -17,8 +16,9 @@ st.set_page_config(page_title="Aircraft Detection Dashboard", page_icon="✈️"
 
 # PROJECT PATH
 PROJECT_ROOT = Path("/home/admin1/Abishek-Intern/new_atr")
-MODEL_PATH = PROJECT_ROOT / "models" / "yolov8s_832_targeted_aug" / "weights" / "best.pt"
-
+MODEL_PATH = PROJECT_ROOT /"models" / "yolov8s_832_79class_no_multiscale" / "weights" / "best.pt"
+#/ "main" /"models" / "yolo_aircraft.pt"
+#/"models" / "yolov8s_832_targeted_aug" / "weights" / "best.pt"
 # GPU CHECK
 if not torch.cuda.is_available():
     st.error("CUDA GPU is not available. This application is configured for GPU-only inference.")
@@ -39,19 +39,14 @@ def load_model():
 model = load_model()
 
 # METHOD REGISTRY + AUTOMATIC LAYER CANDIDATES
-CAM_REGISTRY = {
-    "EigenCAM": EigenCAM, "EigenGradCAM": EigenGradCAM, "GradCAM": GradCAM,
-    "GradCAM++": GradCAMPlusPlus, "XGradCAM": XGradCAM, "HiResCAM": HiResCAM,
-    "LayerCAM": LayerCAM, "ScoreCAM": ScoreCAM, "AblationCAM": AblationCAM,
-}
-OTHER_METHODS = ["Saliency", "SmoothGrad", "IntegratedGradients", "Occlusion", "RISE"]
+CAM_REGISTRY = {"EigenCAM": EigenCAM, "XGradCAM": XGradCAM}
+OTHER_METHODS = ["SmoothGrad", "Occlusion"]
 ALL_METHODS = list(CAM_REGISTRY) + OTHER_METHODS
-DEFAULT_METHODS = [m for m in ALL_METHODS if m != "AblationCAM"]   # AblationCAM often fails on YOLO routing
 
 EIGEN_LAYERS = [-2, -3, -4]        # tried automatically for EigenCAM
 GRAD_LAYERS = [-8, -9, -10]        # tried automatically for gradient CAMs
-SLOW_METHODS = {"ScoreCAM", "AblationCAM"}
-SLOW_LAYERS = [-9]                 # slow methods only try one layer
+SLOW_METHODS = set()
+SLOW_LAYERS = [-9]
 W_LOC = 0.5                        # fixed 50/50 balance: localization vs faithfulness
 
 def layers_for(method):
@@ -72,11 +67,10 @@ st.sidebar.write("**Architecture:** YOLOv8s")
 if hasattr(model, "names"):
     st.sidebar.write(f"**Number of Classes:** {len(model.names)}")
 st.sidebar.write(f"**GPU:** {GPU_NAME}")
-st.sidebar.divider()
-st.sidebar.markdown("### Explainability")
-run_xai = st.sidebar.checkbox("Run explainability comparison", value=True)
-selected_methods = st.sidebar.multiselect("Methods", ALL_METHODS, default=DEFAULT_METHODS)
-max_aircraft = st.sidebar.slider("Max aircraft explained per image", 1, 20, 10)
+
+# Explainability always runs with the four fixed methods (no sidebar controls)
+run_xai = True
+selected_methods = ALL_METHODS
 
 # HEADER
 st.title("Military Aircraft Detection")
@@ -158,11 +152,7 @@ def run_cam(method, layer, wrapped, tensor, target):
     cam_cls = CAM_REGISTRY[method]
     x = tensor.clone().detach().requires_grad_(True)
     layers = [wrapped.model.model[layer]]
-    try:
-        cam_obj = cam_cls(model=wrapped, target_layers=layers,
-                          **({"ratio_channels_to_ablate": 0.25} if method == "AblationCAM" else {}))
-    except TypeError:
-        cam_obj = cam_cls(model=wrapped, target_layers=layers)
+    cam_obj = cam_cls(model=wrapped, target_layers=layers)
     with cam_obj as cam:
         if method == "EigenCAM":                  # class-agnostic by design
             g = cam(input_tensor=x, targets=None, eigen_smooth=True)
@@ -179,21 +169,11 @@ def _input_grad(wrapped, x, target):
         target(out).backward()
     return x.grad.detach()
 
-def saliency_map(wrapped, tensor, target):
-    return _input_grad(wrapped, tensor, target).abs().amax(1)[0].cpu().numpy()
-
 def smoothgrad_map(wrapped, tensor, target, n=16, sigma=0.08):
     acc = torch.zeros_like(tensor)
     for _ in range(n):
         acc += _input_grad(wrapped, tensor + sigma * torch.randn_like(tensor), target).abs()
     return acc.amax(1)[0].cpu().numpy()
-
-def ig_map(wrapped, tensor, target, steps=16):
-    base = torch.full_like(tensor, GRAY)
-    avg = torch.zeros_like(tensor)
-    for a in np.linspace(1 / steps, 1.0, steps):
-        avg += _input_grad(wrapped, base + float(a) * (tensor - base), target)
-    return ((tensor - base) * avg / steps).abs().sum(1)[0].cpu().numpy()
 
 # ---------- perturbation family ----------
 @torch.no_grad()
@@ -215,41 +195,16 @@ def occlusion_map(wrapped, tensor, cls_id, idxs, base, patch=96, stride=48, bs=1
             cnt[y:y + patch, x:x + patch] += 1
     return heat / np.maximum(cnt, 1)
 
-@torch.no_grad()
-def rise_map(wrapped, tensor, cls_id, idxs, n=400, s=10, p=0.5, bs=20):
-    H = tensor.shape[-1]
-    gray = torch.full_like(tensor, GRAY)
-    cell = int(np.ceil(H / s)); up = (s + 1) * cell
-    heat = torch.zeros(H, H, device=tensor.device)
-    rng = np.random.RandomState(0)
-    for i in range(0, n, bs):
-        b = min(bs, n - i)
-        grid = (torch.rand(b, 1, s, s, device=tensor.device) < p).float()
-        big = F.interpolate(grid, size=(up, up), mode="bilinear", align_corners=False)
-        masks = torch.empty(b, 1, H, H, device=tensor.device)
-        for k in range(b):
-            dy, dx = rng.randint(0, cell), rng.randint(0, cell)
-            masks[k] = big[k, :, dy:dy + H, dx:dx + H]
-        sc = score_fn(wrapped(tensor * masks + gray * (1 - masks)), cls_id, idxs).float()
-        heat += (sc.view(b, 1, 1, 1) * masks).sum(0)[0]
-    return (heat / (n * p)).cpu().numpy()
-
 def compute_heat(method, layer, wrapped, tensor, target, cls_id, idxs, base):
     if method in CAM_REGISTRY:
         return norm01(run_cam(method, layer, wrapped, tensor, target))
-    if method == "Saliency":
-        return norm01(cv2.GaussianBlur(saliency_map(wrapped, tensor, target), (0, 0), 6), 99.5)
     if method == "SmoothGrad":
         return norm01(cv2.GaussianBlur(smoothgrad_map(wrapped, tensor, target), (0, 0), 6), 99.5)
-    if method == "IntegratedGradients":
-        return norm01(cv2.GaussianBlur(ig_map(wrapped, tensor, target), (0, 0), 6), 99.5)
     if method == "Occlusion":
         return norm01(cv2.GaussianBlur(occlusion_map(wrapped, tensor, cls_id, idxs, base), (0, 0), 12))
-    if method == "RISE":
-        return norm01(rise_map(wrapped, tensor, cls_id, idxs))
     raise ValueError(method)
 
-# ---------- metrics ----------
+# ---------- metrics (used internally to pick the best method) ----------
 def localization(heat, box_lb):
     H, W = heat.shape
     x1, y1, x2, y2 = [int(round(v)) for v in box_lb]
@@ -282,7 +237,7 @@ def faithfulness(wrapped, tensor, heat, cls_id, idxs, base, fracs=(0.05, 0.10, 0
     return float(np.clip(sc[n:].mean() - sc[:n].mean(), 0, 1))
 
 # ---------- orchestration (cached per image + detection + methods) ----------
-@st.cache_data(show_spinner=False, max_entries=24)
+@st.cache_data(show_spinner=False, max_entries=64)
 def explain_detection(_model, image_np, cls_id, box_xyxy, methods):
     wrapped = get_wrapper(_model)
     tensor, resized, pad_top, pad_left, new_h, new_w, scale = prepare_input(image_np)
@@ -318,16 +273,43 @@ def explain_detection(_model, image_np, cls_id, box_xyxy, methods):
             "base_score": base, "anchor_score": anchor_score, "results": results}
 
 # ---------- rendering ----------
-def make_overlay(view_rgb, heat16, box_view, contour_thr=0.5):
+PALETTE = [(0, 255, 0), (255, 0, 255), (0, 255, 255), (255, 165, 0), (255, 255, 0), (0, 128, 255)]
+
+def region_heat(heat16, box, margin=0.3):
+    """Rescale a prediction's heat inside its own box region so each aircraft shows its own hotspot."""
     heat = heat16.astype(np.float32)
-    ov = np.ascontiguousarray(show_cam_on_image(view_rgb.astype(np.float32) / 255.0, heat, use_rgb=True))
-    cnts, _ = cv2.findContours((heat >= contour_thr).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    cv2.drawContours(ov, cnts, -1, (255, 255, 255), 2)
-    x1, y1, x2, y2 = [int(v) for v in box_view]
-    cv2.rectangle(ov, (x1, y1), (x2, y2), (0, 255, 0), 2)
+    H, W = heat.shape
+    x1, y1, x2, y2 = box
+    mg = margin * max(x2 - x1, y2 - y1)
+    xa, ya = int(max(0, x1 - mg)), int(max(0, y1 - mg))
+    xb, yb = int(min(W, x2 + mg)), int(min(H, y2 + mg))
+    out = np.zeros_like(heat)
+    if xb <= xa or yb <= ya:
+        return out
+    out[ya:yb, xa:xb] = norm01(heat[ya:yb, xa:xb])
+    mask = np.zeros_like(heat)
+    mask[ya:yb, xa:xb] = 1.0
+    mask = cv2.GaussianBlur(mask, (0, 0), 0.08 * max(x2 - x1, y2 - y1) + 1)   # soft edges, no hard rectangle
+    return out * mask
+
+def combined_overlay(view_rgb, items, contour_thr=0.5):
+    """items: list of (index, heat16, box_view). One image showing where the model looks for EVERY aircraft."""
+    H, W = view_rgb.shape[:2]
+    comb = np.zeros((H, W), np.float32)
+    for _, heat16, box in items:
+        comb = np.maximum(comb, region_heat(heat16, box))
+    ov = np.ascontiguousarray(show_cam_on_image(view_rgb.astype(np.float32) / 255.0, comb, use_rgb=True))
+    for k, (idx, heat16, box) in enumerate(items):
+        color = PALETTE[k % len(PALETTE)]
+        rh = region_heat(heat16, box)
+        cnts, _ = cv2.findContours((rh >= contour_thr).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(ov, cnts, -1, color, 2)                       # this aircraft's hotspot outline
+        x1, y1, x2, y2 = [int(v) for v in box]
+        cv2.rectangle(ov, (x1, y1), (x2, y2), color, 2)
+        cv2.putText(ov, f"#{idx}", (x1, max(18, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
     return ov
 
-def zoom_crop(img, box, margin=0.5, min_w=700):
+def zoom_crop(img, box, margin=0.5, min_w=500):
     x1, y1, x2, y2 = box
     m = margin * max(x2 - x1, y2 - y1)
     h, w = img.shape[:2]
@@ -337,65 +319,70 @@ def zoom_crop(img, box, margin=0.5, min_w=700):
         crop = cv2.resize(crop, None, fx=f, fy=f, interpolation=cv2.INTER_CUBIC)
     return crop
 
-def combined_overlay(view_rgb, items, contour_thr=0.5):
-    """items: list of (index, heat16, box_view). One image showing where the model looks for ALL aircraft."""
-    H, W = view_rgb.shape[:2]
-    comb = np.zeros((H, W), np.float32)
-    for _, heat16, (x1, y1, x2, y2) in items:
-        mg = 0.3 * max(x2 - x1, y2 - y1)
-        xa, ya, xb, yb = int(max(0, x1 - mg)), int(max(0, y1 - mg)), int(min(W, x2 + mg)), int(min(H, y2 + mg))
-        reg = np.zeros((H, W), np.float32)
-        reg[ya:yb, xa:xb] = heat16.astype(np.float32)[ya:yb, xa:xb]
-        comb = np.maximum(comb, reg)
-    ov = np.ascontiguousarray(show_cam_on_image(view_rgb.astype(np.float32) / 255.0, comb, use_rgb=True))
-    cnts, _ = cv2.findContours((comb >= contour_thr).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    cv2.drawContours(ov, cnts, -1, (255, 255, 255), 2)
-    for idx, _, (x1, y1, x2, y2) in items:
-        cv2.rectangle(ov, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-        cv2.putText(ov, f"#{idx}", (int(x1), max(18, int(y1) - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-    return ov
-
 def ranked_ok(res):
     return sorted([r for r in res["results"] if "error" not in r], key=lambda r: r["combined"], reverse=True)
 
-xai_rows = []
+def render_image_explanations(explained, image_name):
+    """explained: list of (detection_index, detection_dict, explain_result) for one image."""
+    view_rgb = explained[0][2]["view_rgb"]
+    box_by_idx = {i: res["box_view"] for i, _, res in explained}
+    name_by_idx = {i: f"{d['Aircraft']} ({d['Confidence']:.0%})" for i, d, _ in explained}
+    best_items, best_names, per_method, failures = [], [], {}, set()
 
-def render_aircraft(res, label, image_name):
-    ok = ranked_ok(res)
-    failed = [r for r in res["results"] if "error" in r]
-    st.markdown(f"#### Aircraft {label}")
-    if not ok:
-        st.error("All explainability methods failed for this aircraft.")
-        for r in failed:
-            st.caption(f"{r['name']}: {r['error']}")
+    for i, d, res in explained:
+        ok = ranked_ok(res)
+        for r in res["results"]:
+            if "error" in r:
+                failures.add(f"{r['name']}: {r['error']}")
+        for r in ok:
+            per_method.setdefault(r["method"], {})[i] = r
+        if ok:
+            best_items.append((i, ok[0]["heat"], res["box_view"]))
+            best_names.append(f"#{i} {d['Aircraft']}: {ok[0]['name']}")
+
+    if not best_items:
+        st.error("All explainability methods failed for this image.")
+        for f in sorted(failures):
+            st.caption(f)
         return
-    best = ok[0]
-    for r in ok:
-        xai_rows.append({"Image": image_name, "Aircraft": label, "Method": r["method"],
-                         "Localization": r["loc"], "Faithfulness": r["faith"], "Combined": r["combined"]})
-    st.success(f"Best method: **{best['name']}**  (combined {best['combined']:.2f} | "
-               f"localization {best['loc']:.2f} | faithfulness {best['faith']:.2f})")
-    best_ov = make_overlay(res["view_rgb"], best["heat"], res["box_view"])
-    c1, c2 = st.columns(2, gap="large")
-    with c1:
-        st.image(best_ov, caption="Where the model looks (green box = detection, white outline = strongest attention)", width=800)
-    with c2:
-        st.image(zoom_crop(best_ov, res["box_view"]), caption="Zoom on the aircraft", width=800)
 
-    with st.expander(f"Compare all methods for aircraft {label}"):
-        cols = st.columns(3)
-        for i, r in enumerate(ok):
-            with cols[i % 3]:
-                st.image(make_overlay(res["view_rgb"], r["heat"], res["box_view"]),
-                         caption=f"#{i + 1} {r['name']} - combined {r['combined']:.2f} "
-                                 f"(loc {r['loc']:.2f}, faith {r['faith']:.2f})", width=400)
-        table = pd.DataFrame([{"Rank": i + 1, "Method": r["name"], "Localization": round(r["loc"], 3),
-                               "Faithfulness": round(r["faith"], 3), "Combined": round(r["combined"], 3),
-                               "Peak inside box": bool(r["hit"]), "Time (s)": round(r["time"], 1)}
-                              for i, r in enumerate(ok)])
-        st.dataframe(table, use_container_width=True, hide_index=True)
-        for r in failed:
-            st.caption(f"⚠️ {r['name']} failed: {r['error']}")
+    # 1) ONE image: where the model looks for all aircraft (best method per aircraft)
+    st.markdown("#### Where the model looks")
+    st.image(combined_overlay(view_rgb, best_items), width=1000,
+             caption="Colored box + outline = one aircraft's strongest-attention region. "
+                     "Best method per aircraft: " + " | ".join(best_names))
+
+    # 2) ZOOM on every aircraft
+    st.markdown("#### Zoom on each aircraft")
+    zoom_choice = st.selectbox("Zoom using", ["Best method per aircraft"] + list(per_method),
+                               key=f"zoom_{image_name}")
+    if zoom_choice == "Best method per aircraft":
+        zoom_items = best_items
+    else:
+        zoom_items = [(i, r["heat"], box_by_idx[i]) for i, r in per_method[zoom_choice].items()]
+    zoom_ov = combined_overlay(view_rgb, zoom_items)
+    zcols = st.columns(min(3, len(zoom_items)))
+    for k, (idx, _, box) in enumerate(zoom_items):
+        with zcols[k % len(zcols)]:
+            st.image(zoom_crop(zoom_ov, box), caption=f"#{idx} {name_by_idx[idx]}")
+
+    # 3) Other explainability techniques: one image per method, all aircraft in it
+    st.markdown("#### Other explainability techniques")
+    rows = []
+    for m, per in per_method.items():
+        rows.append({"Method": m,
+                     "Combined": np.mean([r["combined"] for r in per.values()]),   # used only for ordering
+                     "items": [(i, r["heat"], box_by_idx[i]) for i, r in per.items()]})
+    rows.sort(key=lambda r: r["Combined"], reverse=True)
+
+    st.success(f"Best technique for this image: **{rows[0]['Method']}**")
+    cols = st.columns(3)
+    for k, row in enumerate(rows):
+        with cols[k % 3]:
+            st.image(combined_overlay(view_rgb, row["items"]), width=400, caption=row["Method"])
+
+    for f in sorted(failures):
+        st.caption(f"⚠️ {f}")
 
 # =========================== PIPELINE ===========================
 st.divider()
@@ -431,13 +418,10 @@ for image_number, uploaded_file in enumerate(uploaded_files, start=1):
         st.markdown("### YOLOv8 Detection")
         st.image(annotated_rgb, width=800)
 
-    # EXPLAINABILITY FOR EVERY DETECTED AIRCRAFT
+    # EXPLAINABILITY (ALL aircraft in the image)
     if run_xai and detections and selected_methods:
-        st.markdown("### Explainability: where the model looks")
-        order = sorted(range(len(detections)), key=lambda i: -detections[i]["Confidence"])[:max_aircraft]
-        if len(detections) > len(order):
-            st.info(f"{len(detections)} aircraft detected; explaining the {len(order)} most confident "
-                    f"(change this in the sidebar).")
+        st.markdown("### Explainability")
+        order = list(range(len(detections)))
         explained = []
         prog = st.progress(0.0, text="Starting explainability...")
         for n, i in enumerate(order):
@@ -448,20 +432,7 @@ for image_number, uploaded_file in enumerate(uploaded_files, start=1):
                                     tuple(selected_methods))
             explained.append((i, d, res))
         prog.empty()
-
-        if len(explained) > 1:
-            items = []
-            for i, d, res in explained:
-                ok = ranked_ok(res)
-                if ok:
-                    items.append((i, ok[0]["heat"], res["box_view"]))
-            if items:
-                st.markdown("#### All aircraft: where the model looks")
-                st.image(combined_overlay(explained[0][2]["view_rgb"], items),
-                         caption="Each aircraft uses its own best method; labels match the detection numbers below", width=1000)
-
-        for i, d, res in explained:
-            render_aircraft(res, f"#{i}  {d['Aircraft']}  ({d['Confidence']:.0%})", uploaded_file.name)
+        render_image_explanations(explained, uploaded_file.name)
 
     # DETECTION SUMMARY
     st.markdown("### Detection Summary")
@@ -484,11 +455,3 @@ for image_number, uploaded_file in enumerate(uploaded_files, start=1):
     else:
         st.info("No aircraft detected above the selected confidence threshold.")
     st.divider()
-
-# OVERALL WINNER ACROSS ALL EXPLAINED AIRCRAFT
-if xai_rows:
-    st.subheader("Overall Best Explainability Method")
-    overall = (pd.DataFrame(xai_rows).groupby("Method")[["Localization", "Faithfulness", "Combined"]]
-               .mean().sort_values("Combined", ascending=False).round(3))
-    st.success(f"Best on average across all explained aircraft: **{overall.index[0]}**")
-    st.dataframe(overall, use_container_width=True)
