@@ -1,7 +1,0 @@
-commit b891871f5c3c2d11d9775266381da388598686ad
-Author:     Prajbi <go4prajwal.biradar@gmail.com>
-AuthorDate: Tue Oct 27 10:48:28 2026 +0530
-Commit:     Prajbi <go4prajwal.biradar@gmail.com>
-CommitDate: Tue Oct 27 10:48:28 2026 +0530
-
-    Add new aircraft detection files and model updates

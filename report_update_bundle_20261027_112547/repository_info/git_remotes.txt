@@ -1,2 +1,0 @@
-origin	https://github.com/Prajbi/xai_atr.git (fetch)
-origin	https://github.com/Prajbi/xai_atr.git (push)

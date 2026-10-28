@@ -10,6 +10,7 @@ from PIL import Image
 from ultralytics import YOLO
 from pytorch_grad_cam import EigenCAM, XGradCAM
 from pytorch_grad_cam.utils.image import show_cam_on_image
+from streamlit_image_coordinates import streamlit_image_coordinates
 
 # PAGE CONFIG
 st.set_page_config(page_title="Aircraft Detection Dashboard", page_icon="✈️", layout="wide", initial_sidebar_state="expanded")
@@ -272,186 +273,165 @@ def explain_detection(_model, image_np, cls_id, box_xyxy, methods):
     return {"view_rgb": resized, "box_view": (x1 * scale, y1 * scale, x2 * scale, y2 * scale),
             "base_score": base, "anchor_score": anchor_score, "results": results}
 
-# ---------- rendering ----------
-PALETTE = [(0, 255, 0), (255, 0, 255), (0, 255, 255), (255, 165, 0), (255, 255, 0), (0, 128, 255)]
 
-def region_heat(heat16, box, margin=0.3):
-    """Rescale a prediction's heat inside its own box region so each aircraft shows its own hotspot."""
-    heat = heat16.astype(np.float32)
-    H, W = heat.shape
-    x1, y1, x2, y2 = box
-    mg = margin * max(x2 - x1, y2 - y1)
-    xa, ya = int(max(0, x1 - mg)), int(max(0, y1 - mg))
-    xb, yb = int(min(W, x2 + mg)), int(min(H, y2 + mg))
-    out = np.zeros_like(heat)
-    if xb <= xa or yb <= ya:
-        return out
-    out[ya:yb, xa:xb] = norm01(heat[ya:yb, xa:xb])
-    mask = np.zeros_like(heat)
-    mask[ya:yb, xa:xb] = 1.0
-    mask = cv2.GaussianBlur(mask, (0, 0), 0.08 * max(x2 - x1, y2 - y1) + 1)   # soft edges, no hard rectangle
-    return out * mask
-
-def combined_overlay(view_rgb, items, contour_thr=0.5):
-    """items: list of (index, heat16, box_view). One image showing where the model looks for EVERY aircraft."""
-    H, W = view_rgb.shape[:2]
-    comb = np.zeros((H, W), np.float32)
-    for _, heat16, box in items:
-        comb = np.maximum(comb, region_heat(heat16, box))
-    ov = np.ascontiguousarray(show_cam_on_image(view_rgb.astype(np.float32) / 255.0, comb, use_rgb=True))
-    for k, (idx, heat16, box) in enumerate(items):
-        color = PALETTE[k % len(PALETTE)]
-        rh = region_heat(heat16, box)
-        cnts, _ = cv2.findContours((rh >= contour_thr).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        cv2.drawContours(ov, cnts, -1, color, 2)                       # this aircraft's hotspot outline
-        x1, y1, x2, y2 = [int(v) for v in box]
-        cv2.rectangle(ov, (x1, y1), (x2, y2), color, 2)
-        cv2.putText(ov, f"#{idx}", (x1, max(18, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-    return ov
-
-def zoom_crop(img, box, margin=0.5, min_w=500):
-    x1, y1, x2, y2 = box
-    m = margin * max(x2 - x1, y2 - y1)
+# ---------- selected-aircraft rendering ----------
+def crop_with_margin(img, box, margin=0.45, min_width=420):
+    x1, y1, x2, y2 = [float(v) for v in box]
     h, w = img.shape[:2]
-    crop = img[int(max(0, y1 - m)):int(min(h, y2 + m)), int(max(0, x1 - m)):int(min(w, x2 + m))]
-    if crop.shape[1] < min_w:
-        f = min_w / crop.shape[1]
-        crop = cv2.resize(crop, None, fx=f, fy=f, interpolation=cv2.INTER_CUBIC)
+    m = margin * max(x2 - x1, y2 - y1)
+    xa, ya = max(0, int(x1 - m)), max(0, int(y1 - m))
+    xb, yb = min(w, int(x2 + m)), min(h, int(y2 + m))
+    crop = img[ya:yb, xa:xb]
+    if crop.size == 0:
+        return img
+    if crop.shape[1] < min_width:
+        factor = min_width / crop.shape[1]
+        crop = cv2.resize(crop, None, fx=factor, fy=factor, interpolation=cv2.INTER_CUBIC)
     return crop
 
-def ranked_ok(res):
-    return sorted([r for r in res["results"] if "error" not in r], key=lambda r: r["combined"], reverse=True)
 
-def render_image_explanations(explained, image_name):
-    """explained: list of (detection_index, detection_dict, explain_result) for one image."""
-    view_rgb = explained[0][2]["view_rgb"]
-    box_by_idx = {i: res["box_view"] for i, _, res in explained}
-    name_by_idx = {i: f"{d['Aircraft']} ({d['Confidence']:.0%})" for i, d, _ in explained}
-    best_items, best_names, per_method, failures = [], [], {}, set()
-
-    for i, d, res in explained:
-        ok = ranked_ok(res)
-        for r in res["results"]:
-            if "error" in r:
-                failures.add(f"{r['name']}: {r['error']}")
-        for r in ok:
-            per_method.setdefault(r["method"], {})[i] = r
-        if ok:
-            best_items.append((i, ok[0]["heat"], res["box_view"]))
-            best_names.append(f"#{i} {d['Aircraft']}: {ok[0]['name']}")
-
-    if not best_items:
-        st.error("All explainability methods failed for this image.")
-        for f in sorted(failures):
-            st.caption(f)
+def render_selected_explainability(explain_result, detection, detection_id):
+    view_rgb = explain_result["view_rgb"]
+    box = explain_result["box_view"]
+    valid = [r for r in explain_result["results"] if "error" not in r]
+    failures = [r for r in explain_result["results"] if "error" in r]
+    if not valid:
+        st.error("All explainability methods failed for this aircraft.")
+        for failure in failures:
+            st.caption(f"{failure['name']}: {failure['error']}")
         return
 
-    # 1) ONE image: where the model looks for all aircraft (best method per aircraft)
-    st.markdown("#### Where the model looks")
-    st.image(combined_overlay(view_rgb, best_items), width=1000,
-             caption="Colored box + outline = one aircraft's strongest-attention region. "
-                     "Best method per aircraft: " + " | ".join(best_names))
+    valid.sort(key=lambda r: r["combined"], reverse=True)
+    st.success(f"Best technique for this aircraft: **{valid[0]['name']}**")
+    st.caption("Explainability was computed only for the aircraft you selected. Scores are internal comparison metrics, not classification accuracy.")
+    cols = st.columns(2)
+    for i, item in enumerate(valid):
+        heat = item["heat"].astype(np.float32)
+        heat = norm01(heat)
+        overlay = show_cam_on_image(view_rgb.astype(np.float32) / 255.0, heat, use_rgb=True)
+        crop = crop_with_margin(overlay, box)
+        with cols[i % 2]:
+            st.image(crop, caption=f"{item['name']} — Localization: {item['loc']:.3f} | Faithfulness: {item['faith']:.3f}", use_container_width=True)
+    for failure in failures:
+        st.warning(f"{failure['name']} failed: {failure['error']}")
 
-    # 2) ZOOM on every aircraft
-    st.markdown("#### Zoom on each aircraft")
-    zoom_choice = st.selectbox("Zoom using", ["Best method per aircraft"] + list(per_method),
-                               key=f"zoom_{image_name}")
-    if zoom_choice == "Best method per aircraft":
-        zoom_items = best_items
-    else:
-        zoom_items = [(i, r["heat"], box_by_idx[i]) for i, r in per_method[zoom_choice].items()]
-    zoom_ov = combined_overlay(view_rgb, zoom_items)
-    zcols = st.columns(min(3, len(zoom_items)))
-    for k, (idx, _, box) in enumerate(zoom_items):
-        with zcols[k % len(zcols)]:
-            st.image(zoom_crop(zoom_ov, box), caption=f"#{idx} {name_by_idx[idx]}")
-
-    # 3) Other explainability techniques: one image per method, all aircraft in it
-    st.markdown("#### Other explainability techniques")
-    rows = []
-    for m, per in per_method.items():
-        rows.append({"Method": m,
-                     "Combined": np.mean([r["combined"] for r in per.values()]),   # used only for ordering
-                     "items": [(i, r["heat"], box_by_idx[i]) for i, r in per.items()]})
-    rows.sort(key=lambda r: r["Combined"], reverse=True)
-
-    st.success(f"Best technique for this image: **{rows[0]['Method']}**")
-    cols = st.columns(3)
-    for k, row in enumerate(rows):
-        with cols[k % 3]:
-            st.image(combined_overlay(view_rgb, row["items"]), width=400, caption=row["Method"])
-
-    for f in sorted(failures):
-        st.caption(f"⚠️ {f}")
 
 # =========================== PIPELINE ===========================
 st.divider()
 st.subheader(f"Detection Results ({len(uploaded_files)} Images)")
-all_detections = []
-for image_number, uploaded_file in enumerate(uploaded_files, start=1):
-    st.markdown(f"## Image {image_number}: `{uploaded_file.name}`")
-    image = Image.open(uploaded_file).convert("RGB")
-    image_np = np.array(image)
 
-    with st.spinner(f"Detecting aircraft in {uploaded_file.name}..."):
-        results = model.predict(source=image, conf=confidence, imgsz=IMGSZ, device=DEVICE, verbose=False)
-    result = results[0]
-
+@st.cache_data(show_spinner=False, max_entries=32)
+def cached_detect(image_bytes, conf, imgsz):
+    """Cache deterministic detection output so Streamlit reruns don't rerun YOLO."""
+    pil_image = Image.open(__import__('io').BytesIO(image_bytes)).convert("RGB")
+    image_np = np.array(pil_image)
+    prediction = model.predict(source=pil_image, conf=conf, imgsz=imgsz, device=DEVICE, verbose=False)[0]
     detections = []
-    if result.boxes is not None and len(result.boxes) > 0:
-        boxes = result.boxes
+    if prediction.boxes is not None and len(prediction.boxes) > 0:
+        boxes = prediction.boxes
         for i in range(len(boxes)):
             class_id = int(boxes.cls[i].item())
             x1, y1, x2, y2 = boxes.xyxy[i].tolist()
-            detections.append({"Image": uploaded_file.name, "ClassID": class_id, "Aircraft": model.names[class_id],
-                               "Confidence": float(boxes.conf[i].item()), "X1": round(x1, 2), "Y1": round(y1, 2),
-                               "X2": round(x2, 2), "Y2": round(y2, 2)})
-    df = pd.DataFrame(detections)
-    all_detections.extend(detections)
+            detections.append({
+                "ClassID": class_id,
+                "Aircraft": model.names[class_id],
+                "Confidence": float(boxes.conf[i].item()),
+                "X1": float(x1), "Y1": float(y1), "X2": float(x2), "Y2": float(y2)
+            })
+    annotated_rgb = cv2.cvtColor(prediction.plot(), cv2.COLOR_BGR2RGB)
+    return image_np, annotated_rgb, detections
 
-    annotated_rgb = cv2.cvtColor(result.plot(), cv2.COLOR_BGR2RGB)
+for image_number, uploaded_file in enumerate(uploaded_files, start=1):
+    st.markdown(f"## Image {image_number}: `{uploaded_file.name}`")
+    image_bytes = uploaded_file.getvalue()
+    image_np, annotated_rgb, detections = cached_detect(image_bytes, confidence, IMGSZ)
+    original_image = Image.fromarray(image_np)
+
     col1, col2 = st.columns(2, gap="large")
     with col1:
-        st.markdown("### Original Image")
-        st.image(image, width=800)
+        st.markdown("### 1. Original Image")
+        st.image(original_image, use_container_width=True)
     with col2:
-        st.markdown("### YOLOv8 Detection")
-        st.image(annotated_rgb, width=800)
-
-    # EXPLAINABILITY (ALL aircraft in the image)
-    if run_xai and detections and selected_methods:
-        st.markdown("### Explainability")
-        order = list(range(len(detections)))
-        explained = []
-        prog = st.progress(0.0, text="Starting explainability...")
-        for n, i in enumerate(order):
-            d = detections[i]
-            prog.progress(n / len(order), text=f"Explaining aircraft {n + 1}/{len(order)}: {d['Aircraft']} "
-                                               f"(first run is slow, results are cached)")
-            res = explain_detection(model, image_np, d["ClassID"], (d["X1"], d["Y1"], d["X2"], d["Y2"]),
-                                    tuple(selected_methods))
-            explained.append((i, d, res))
-        prog.empty()
-        render_image_explanations(explained, uploaded_file.name)
-
-    # DETECTION SUMMARY
-    st.markdown("### Detection Summary")
-    if detections:
-        avg_c, max_c, n_types = df["Confidence"].mean(), df["Confidence"].max(), df["Aircraft"].nunique()
-    else:
-        avg_c = max_c = 0.0; n_types = 0
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Total Detections", len(detections))
-    m2.metric("Aircraft Types", n_types)
-    m3.metric("Average Confidence", f"{avg_c:.2%}")
-    m4.metric("Highest Confidence", f"{max_c:.2%}")
+        st.markdown("### 2. YOLOv8 Detection — click a bounding box")
+        if detections:
+            # The coordinate component returns click coordinates in the displayed image.
+            clicked = streamlit_image_coordinates(
+                Image.fromarray(annotated_rgb),
+                key=f"aircraft_click_{image_number}_{uploaded_file.name}"
+            )
+        else:
+            st.image(annotated_rgb, use_container_width=True)
+            clicked = None
 
     if detections:
-        st.markdown("### Detection Details")
-        display_df = df[["Aircraft", "Confidence"]].copy()
-        display_df.index = [f"#{i}" for i in range(len(display_df))]
-        display_df["Confidence"] = display_df["Confidence"].map(lambda x: f"{x:.2%}")
-        st.dataframe(display_df, use_container_width=True)
+        st.markdown("### 3. Detection list")
+        display_df = pd.DataFrame([
+            {"ID": f"#{i + 1}", "Aircraft": d["Aircraft"], "Confidence": f"{d['Confidence']:.2%}"}
+            for i, d in enumerate(detections)
+        ])
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+        # A click is mapped from the displayed image coordinates back to original pixels.
+        clicked_id = None
+        if clicked and clicked.get("x") is not None and clicked.get("y") is not None:
+            disp_w = float(clicked.get("width") or annotated_rgb.shape[1])
+            disp_h = float(clicked.get("height") or annotated_rgb.shape[0])
+            px = clicked["x"] * image_np.shape[1] / disp_w
+            py = clicked["y"] * image_np.shape[0] / disp_h
+            hits = []
+            for i, d in enumerate(detections):
+                if d["X1"] <= px <= d["X2"] and d["Y1"] <= py <= d["Y2"]:
+                    area = max(1.0, (d["X2"] - d["X1"]) * (d["Y2"] - d["Y1"]))
+                    hits.append((area, i))
+            if hits:
+                # If boxes overlap, select the smallest box containing the click.
+                clicked_id = min(hits)[1]
+                st.session_state[f"selected_aircraft_{image_number}"] = clicked_id
+                # Keep the dropdown synchronized with the aircraft clicked on the image.
+                st.session_state[f"aircraft_select_{image_number}_{uploaded_file.name}"] = clicked_id
+            else:
+                st.info("Your click was outside all detected bounding boxes. Click inside an aircraft box.")
+
+        selection_key = f"selected_aircraft_{image_number}"
+        current_selection = st.session_state.get(selection_key, 0)
+        if current_selection >= len(detections):
+            current_selection = 0
+        selected_id = st.selectbox(
+            "Selected aircraft (you can also choose from this list)",
+            options=list(range(len(detections))),
+            index=current_selection,
+            format_func=lambda i: f"#{i + 1} — {detections[i]['Aircraft']} ({detections[i]['Confidence']:.1%})",
+            key=f"aircraft_select_{image_number}_{uploaded_file.name}"
+        )
+        st.session_state[selection_key] = selected_id
+        selected = detections[selected_id]
+        selected_box = (selected["X1"], selected["Y1"], selected["X2"], selected["Y2"])
+
+        st.markdown("### 4. Zoom on Selected Aircraft")
+        st.write(f"**Aircraft #{selected_id + 1}:** {selected['Aircraft']}  |  **Confidence:** {selected['Confidence']:.2%}")
+        st.image(crop_with_margin(image_np, selected_box), caption="Cropped from the original image.", use_container_width=True)
+
+        st.markdown("### 5. Explainability of Selected Aircraft")
+        run_key = f"run_xai_{image_number}_{uploaded_file.name}_{selected_id}"
+        if st.button(f"Run Explainability for Aircraft #{selected_id + 1}", key=run_key, type="primary"):
+            with st.spinner(f"Running explainability for Aircraft #{selected_id + 1} ({selected['Aircraft']})…"):
+                result = explain_detection(
+                    model,
+                    image_np,
+                    selected["ClassID"],
+                    selected_box,
+                    tuple(ALL_METHODS)
+                )
+            render_selected_explainability(result, selected, selected_id + 1)
+        else:
+            st.info("Explainability has not run yet. Click the button above when you are ready.")
+
+        st.markdown("### Detection Summary")
+        summary_cols = st.columns(4)
+        summary_cols[0].metric("Total Detections", len(detections))
+        summary_cols[1].metric("Aircraft Types", len(set(d["Aircraft"] for d in detections)))
+        summary_cols[2].metric("Average Confidence", f"{np.mean([d['Confidence'] for d in detections]):.2%}")
+        summary_cols[3].metric("Highest Confidence", f"{max(d['Confidence'] for d in detections):.2%}")
     else:
         st.info("No aircraft detected above the selected confidence threshold.")
     st.divider()

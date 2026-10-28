@@ -1,3 +1,4 @@
+#ORIGINAL UI 
 import time
 import cv2
 import numpy as np
@@ -8,8 +9,7 @@ import torch.nn.functional as F
 from pathlib import Path
 from PIL import Image
 from ultralytics import YOLO
-from pytorch_grad_cam import (EigenCAM, EigenGradCAM, GradCAM, GradCAMPlusPlus,
-                              XGradCAM, HiResCAM, LayerCAM, ScoreCAM, AblationCAM)
+from pytorch_grad_cam import EigenCAM, XGradCAM
 from pytorch_grad_cam.utils.image import show_cam_on_image
 
 # PAGE CONFIG
@@ -17,7 +17,7 @@ st.set_page_config(page_title="Aircraft Detection Dashboard", page_icon="✈️"
 
 # PROJECT PATH
 PROJECT_ROOT = Path("/home/admin1/Abishek-Intern/new_atr")
-MODEL_PATH = PROJECT_ROOT / "best.pt"
+MODEL_PATH = PROJECT_ROOT /"models" / "yolov8s_832_79class_multiscale" / "weights" / "best.pt"
 #/ "main" /"models" / "yolo_aircraft.pt"
 #/"models" / "yolov8s_832_targeted_aug" / "weights" / "best.pt"
 # GPU CHECK
@@ -40,15 +40,14 @@ def load_model():
 model = load_model()
 
 # METHOD REGISTRY + AUTOMATIC LAYER CANDIDATES
-CAM_REGISTRY = {"EigenCAM": EigenCAM,"XGradCAM": XGradCAM, }
-OTHER_METHODS = ["SmoothGrad","Occlusion"]
+CAM_REGISTRY = {"EigenCAM": EigenCAM, "XGradCAM": XGradCAM}
+OTHER_METHODS = ["SmoothGrad", "Occlusion"]
 ALL_METHODS = list(CAM_REGISTRY) + OTHER_METHODS
-DEFAULT_METHODS = [m for m in ALL_METHODS if m != "AblationCAM"]   # AblationCAM often fails on YOLO routing
 
 EIGEN_LAYERS = [-2, -3, -4]        # tried automatically for EigenCAM
 GRAD_LAYERS = [-8, -9, -10]        # tried automatically for gradient CAMs
-SLOW_METHODS = {"ScoreCAM", "AblationCAM"}
-SLOW_LAYERS = [-9]                 # slow methods only try one layer
+SLOW_METHODS = set()
+SLOW_LAYERS = [-9]
 W_LOC = 0.5                        # fixed 50/50 balance: localization vs faithfulness
 
 def layers_for(method):
@@ -69,10 +68,10 @@ st.sidebar.write("**Architecture:** YOLOv8s")
 if hasattr(model, "names"):
     st.sidebar.write(f"**Number of Classes:** {len(model.names)}")
 st.sidebar.write(f"**GPU:** {GPU_NAME}")
-st.sidebar.divider()
-st.sidebar.markdown("### Explainability")
-run_xai = st.sidebar.checkbox("Run explainability comparison", value=True)
-selected_methods = st.sidebar.multiselect("Methods", ALL_METHODS, default=DEFAULT_METHODS)
+
+# Explainability always runs with the four fixed methods (no sidebar controls)
+run_xai = True
+selected_methods = ALL_METHODS
 
 # HEADER
 st.title("Military Aircraft Detection")
@@ -154,11 +153,7 @@ def run_cam(method, layer, wrapped, tensor, target):
     cam_cls = CAM_REGISTRY[method]
     x = tensor.clone().detach().requires_grad_(True)
     layers = [wrapped.model.model[layer]]
-    try:
-        cam_obj = cam_cls(model=wrapped, target_layers=layers,
-                          **({"ratio_channels_to_ablate": 0.25} if method == "AblationCAM" else {}))
-    except TypeError:
-        cam_obj = cam_cls(model=wrapped, target_layers=layers)
+    cam_obj = cam_cls(model=wrapped, target_layers=layers)
     with cam_obj as cam:
         if method == "EigenCAM":                  # class-agnostic by design
             g = cam(input_tensor=x, targets=None, eigen_smooth=True)
@@ -175,21 +170,11 @@ def _input_grad(wrapped, x, target):
         target(out).backward()
     return x.grad.detach()
 
-def saliency_map(wrapped, tensor, target):
-    return _input_grad(wrapped, tensor, target).abs().amax(1)[0].cpu().numpy()
-
 def smoothgrad_map(wrapped, tensor, target, n=16, sigma=0.08):
     acc = torch.zeros_like(tensor)
     for _ in range(n):
         acc += _input_grad(wrapped, tensor + sigma * torch.randn_like(tensor), target).abs()
     return acc.amax(1)[0].cpu().numpy()
-
-def ig_map(wrapped, tensor, target, steps=16):
-    base = torch.full_like(tensor, GRAY)
-    avg = torch.zeros_like(tensor)
-    for a in np.linspace(1 / steps, 1.0, steps):
-        avg += _input_grad(wrapped, base + float(a) * (tensor - base), target)
-    return ((tensor - base) * avg / steps).abs().sum(1)[0].cpu().numpy()
 
 # ---------- perturbation family ----------
 @torch.no_grad()
@@ -211,38 +196,13 @@ def occlusion_map(wrapped, tensor, cls_id, idxs, base, patch=96, stride=48, bs=1
             cnt[y:y + patch, x:x + patch] += 1
     return heat / np.maximum(cnt, 1)
 
-@torch.no_grad()
-def rise_map(wrapped, tensor, cls_id, idxs, n=400, s=10, p=0.5, bs=20):
-    H = tensor.shape[-1]
-    gray = torch.full_like(tensor, GRAY)
-    cell = int(np.ceil(H / s)); up = (s + 1) * cell
-    heat = torch.zeros(H, H, device=tensor.device)
-    rng = np.random.RandomState(0)
-    for i in range(0, n, bs):
-        b = min(bs, n - i)
-        grid = (torch.rand(b, 1, s, s, device=tensor.device) < p).float()
-        big = F.interpolate(grid, size=(up, up), mode="bilinear", align_corners=False)
-        masks = torch.empty(b, 1, H, H, device=tensor.device)
-        for k in range(b):
-            dy, dx = rng.randint(0, cell), rng.randint(0, cell)
-            masks[k] = big[k, :, dy:dy + H, dx:dx + H]
-        sc = score_fn(wrapped(tensor * masks + gray * (1 - masks)), cls_id, idxs).float()
-        heat += (sc.view(b, 1, 1, 1) * masks).sum(0)[0]
-    return (heat / (n * p)).cpu().numpy()
-
 def compute_heat(method, layer, wrapped, tensor, target, cls_id, idxs, base):
     if method in CAM_REGISTRY:
         return norm01(run_cam(method, layer, wrapped, tensor, target))
-    if method == "Saliency":
-        return norm01(cv2.GaussianBlur(saliency_map(wrapped, tensor, target), (0, 0), 6), 99.5)
     if method == "SmoothGrad":
         return norm01(cv2.GaussianBlur(smoothgrad_map(wrapped, tensor, target), (0, 0), 6), 99.5)
-    if method == "IntegratedGradients":
-        return norm01(cv2.GaussianBlur(ig_map(wrapped, tensor, target), (0, 0), 6), 99.5)
     if method == "Occlusion":
         return norm01(cv2.GaussianBlur(occlusion_map(wrapped, tensor, cls_id, idxs, base), (0, 0), 12))
-    if method == "RISE":
-        return norm01(rise_map(wrapped, tensor, cls_id, idxs))
     raise ValueError(method)
 
 # ---------- metrics (used internally to pick the best method) ----------

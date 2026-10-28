@@ -1,0 +1,10 @@
+def zoom_crop(img, box, margin=0.5, min_w=500):
+    x1, y1, x2, y2 = box
+    m = margin * max(x2 - x1, y2 - y1)
+    h, w = img.shape[:2]
+    crop = img[int(max(0, y1 - m)):int(min(h, y2 + m)), int(max(0, x1 - m)):int(min(w, x2 + m))]
+    if crop.shape[1] < min_w:
+        f = min_w / crop.shape[1]
+        crop = cv2.resize(crop, None, fx=f, fy=f, interpolation=cv2.INTER_CUBIC)
+    return crop
+

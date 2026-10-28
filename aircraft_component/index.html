@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin:0; padding:0; font-family:Arial,sans-serif; background:transparent; }
+  #hint { font-size:13px; color:#777; margin-bottom:6px; }
+  #stage { position:relative; width:100%; overflow:hidden; background:#151515; border-radius:8px; }
+  #view { width:100%; height:100%; display:block; cursor:crosshair; }
+  #popup { display:none; position:absolute; z-index:5; width:230px; padding:6px; background:#fff; color:#111;
+           border:2px solid #f0c419; border-radius:8px; box-shadow:0 4px 18px #0008; pointer-events:none; }
+  #popup-title { font-size:12px; font-weight:bold; margin-bottom:4px; }
+  #zoom { width:216px; height:130px; display:block; background:#222; }
+  #popup-foot { font-size:11px; color:#444; margin-top:3px; }
+  #selected { margin-top:7px; padding:8px 10px; border-radius:6px; background:#f3f4f6; color:#111; font-weight:600; }
+</style>
+</head>
+<body>
+<div id="hint">Hover over a box to preview that aircraft; click to select it.</div>
+<div id="stage">
+  <canvas id="view"></canvas>
+  <div id="popup">
+    <div id="popup-title"></div>
+    <canvas id="zoom" width="216" height="130"></canvas>
+    <div id="popup-foot">Click the box to select</div>
+  </div>
+</div>
+<div id="selected">Selected aircraft: none</div>
+<script>
+  function send(type, extra) {
+    window.parent.postMessage(Object.assign({isStreamlitMessage: true, type: type}, extra || {}), "*");
+  }
+
+  const stage = document.getElementById('stage');
+  const canvas = document.getElementById('view');
+  const ctx = canvas.getContext('2d');
+  const popup = document.getElementById('popup');
+  const zoomCanvas = document.getElementById('zoom');
+  const zctx = zoomCanvas.getContext('2d');
+  const title = document.getElementById('popup-title');
+  const selectedBox = document.getElementById('selected');
+
+  let img = null, imgSrc = "", dets = [], selected = -1, hovered = -1;
+  let scale = 1, ox = 0, oy = 0, stageH = 560;
+
+  function updateSelectedText() {
+    selectedBox.textContent = (selected >= 0 && dets[selected])
+      ? 'Selected aircraft: ' + dets[selected].label : 'Selected aircraft: none';
+  }
+
+  function fitCanvas() {
+    if (!img) return;
+    const rect = stage.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+    canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    scale = Math.min(rect.width / img.width, rect.height / img.height);
+    ox = (rect.width - img.width * scale) / 2;
+    oy = (rect.height - img.height * scale) / 2;
+    draw();
+  }
+
+  function draw() {
+    if (!img) return;
+    const rect = stage.getBoundingClientRect();
+    const cw = rect.width, ch = rect.height;
+    ctx.clearRect(0, 0, cw, ch);
+    ctx.fillStyle = '#151515'; ctx.fillRect(0, 0, cw, ch);
+    ctx.drawImage(img, ox, oy, img.width * scale, img.height * scale);
+    dets.forEach((d, i) => {
+      const b = d.box;
+      const x = ox + b[0] * scale, y = oy + b[1] * scale;
+      const w = (b[2] - b[0]) * scale, h = (b[3] - b[1]) * scale;
+      const active = (i === selected), hover = (i === hovered);
+      const col = active ? '#ffd400' : (hover ? '#00e5ff' : '#00ff66');
+      ctx.lineWidth = (active || hover) ? 4 : 2;
+      ctx.strokeStyle = col;
+      ctx.strokeRect(x, y, w, h);
+      const fontSize = Math.max(11, Math.min(16, cw / 75));
+      ctx.font = 'bold ' + fontSize + 'px Arial';
+      const tw = ctx.measureText(d.label).width;
+      const lh = fontSize + 8;
+      const lx = Math.max(0, Math.min(x, cw - tw - 12));
+      const ly = Math.max(lh, y);
+      ctx.fillStyle = col;
+      ctx.fillRect(lx, ly - lh, tw + 10, lh);
+      ctx.fillStyle = '#111';
+      ctx.fillText(d.label, lx + 5, ly - 5);
+    });
+  }
+
+  function hitTest(px, py) {
+    const x = (px - ox) / scale, y = (py - oy) / scale;
+    const hits = dets.filter(d => x >= d.box[0] && x <= d.box[2] && y >= d.box[1] && y <= d.box[3]);
+    if (!hits.length) return -1;
+    hits.sort((a, b) => ((a.box[2]-a.box[0])*(a.box[3]-a.box[1])) - ((b.box[2]-b.box[0])*(b.box[3]-b.box[1])));
+    return hits[0].id;   // smallest box under the cursor wins (handles overlaps)
+  }
+
+  function drawPopup(d, px, py) {
+    const b = d.box, margin = Math.max(b[2]-b[0], b[3]-b[1]) * 0.35;
+    const x1 = Math.max(0, b[0]-margin), y1 = Math.max(0, b[1]-margin);
+    const x2 = Math.min(img.width, b[2]+margin), y2 = Math.min(img.height, b[3]+margin);
+    const sw = x2 - x1, sh = y2 - y1;
+    zctx.fillStyle = '#222'; zctx.fillRect(0, 0, zoomCanvas.width, zoomCanvas.height);
+    if (sw > 0 && sh > 0) {
+      const s = Math.min(zoomCanvas.width / sw, zoomCanvas.height / sh);
+      const dw = sw * s, dh = sh * s;
+      const offx = (zoomCanvas.width - dw) / 2, offy = (zoomCanvas.height - dh) / 2;
+      zctx.drawImage(img, x1, y1, sw, sh, offx, offy, dw, dh);
+      zctx.strokeStyle = '#ffd400'; zctx.lineWidth = 3;
+      zctx.strokeRect((b[0]-x1)*s + offx, (b[1]-y1)*s + offy, (b[2]-b[0])*s, (b[3]-b[1])*s);
+    }
+    title.textContent = d.label;
+    popup.style.display = 'block';
+    popup.style.left = Math.min(Math.max(4, px + 14), stage.clientWidth - 242) + 'px';
+    popup.style.top = Math.min(Math.max(4, py + 14), stage.clientHeight - 205) + 'px';
+  }
+
+  canvas.addEventListener('mousemove', e => {
+    const r = canvas.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    hovered = hitTest(x, y);
+    draw();
+    if (hovered >= 0) drawPopup(dets[hovered], x, y); else popup.style.display = 'none';
+  });
+  canvas.addEventListener('mouseleave', () => { hovered = -1; popup.style.display = 'none'; draw(); });
+  canvas.addEventListener('click', e => {
+    const r = canvas.getBoundingClientRect();
+    const id = hitTest(e.clientX - r.left, e.clientY - r.top);
+    if (id < 0) return;
+    selected = id;
+    updateSelectedText();
+    draw();
+    // a timestamp makes every click a "new" value, even re-clicking the same box
+    send('streamlit:setComponentValue', {value: {id: id, t: Date.now()}, dataType: 'json'});
+  });
+  window.addEventListener('resize', fitCanvas);
+
+  function onRender(args) {
+    dets = args.dets || [];
+    selected = (args.selected === null || args.selected === undefined) ? -1 : args.selected;
+    stageH = args.height || 560;
+    stage.style.height = stageH + 'px';
+    updateSelectedText();
+    if (args.image && args.image !== imgSrc) {
+      imgSrc = args.image;
+      const im = new Image();
+      im.onload = () => { img = im; fitCanvas(); };
+      im.src = imgSrc;
+    } else {
+      fitCanvas();
+    }
+    send('streamlit:setFrameHeight', {height: stageH + 90});
+  }
+
+  window.addEventListener('message', e => {
+    if (e.data && e.data.type === 'streamlit:render') onRender(e.data.args);
+  });
+  send('streamlit:componentReady', {apiVersion: 1});
+</script>
+</body>
+</html>

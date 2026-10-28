@@ -1,0 +1,7 @@
+path: /home/admin1/Abishek-Intern/new_atr/data/tejas_only
+train: images/train
+val: images/validation
+test: images/test
+nc: 1
+names:
+  0: Tejas
