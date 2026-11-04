@@ -1,0 +1,19 @@
+Yolov11s exp 1 ( baseline ) : IMG SIZE - 640,No multiscale
+
+yolo detect train model=yolo11s.pt data=/home/admin1/Abishek-Intern/new_atr/data/yolo_79class_balanced_aug/data.yaml epochs=150 imgsz=640 batch=48 device=0 workers=8 cache=ram amp=True patience=25 multi_scale=False mixup=0.15 copy_paste=0.1 project=/home/admin1/Abishek-Intern/new_atr/models name=Yolov11_640_no_multiscale seed=42 resume=False
+
+yolo detect train \
+model=/home/admin1/Abishek-Intern/new_atr/models/Yolov11_640_no_multiscale/weights/last.pt \
+resume=True
+
+Result:
+
+
+
+
+
+
+Exp 2 :
+Img size - 640,multiscale
+
+yolo detect train model=yolo11s.pt data=/home/admin1/Abishek-Intern/new_atr/data/yolo_79class_balanced_aug/data.yaml epochs=150 imgsz=640 batch=48 device=0 workers=8 cache=ram amp=True patience=25 multi_scale=True mixup=0.15 copy_paste=0.1 project=/home/admin1/Abishek-Intern/new_atr/models name=Yolov11s_640_multiscale seed=42 resume=False

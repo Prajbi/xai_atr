@@ -16,7 +16,7 @@ st.set_page_config(page_title="Aircraft Detection Dashboard", page_icon="✈️"
 
 # PROJECT PATH
 PROJECT_ROOT = Path("/home/admin1/Abishek-Intern/new_atr")
-MODEL_PATH = PROJECT_ROOT /"models" / "yolov8s_832_targeted_aug" / "weights" / "best.pt"
+MODEL_PATH = PROJECT_ROOT /"models" / "yolov8s_j35_component_aware" / "weights" / "best.pt"
 #/ "main" /"models" / "yolo_aircraft.pt"
 #/"models" / "yolov8s_832_targeted_aug" / "weights" / "best.pt"
 # GPU CHECK

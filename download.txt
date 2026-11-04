@@ -1,0 +1,592 @@
+yolo detect train \
+model=/home/admin1/Abishek-Intern/new_atr/models/yolov8s_832_79class_multiscale/weights/last.pt \
+resume=True
+
+
+
+- Training: 179 images
+- Validation: 51 images
+- Testing: 27 images
+
+
+
+
+SOURCE = Path(
+    "/home/admin1/Abishek-Intern/new_atr/data/aircrafts/J35"
+)
+
+OUTPUT = Path(
+    "/home/admin1/Abishek-Intern/new_atr/data/yolo_j35_parts"
+)
+
+python convert_j35_to_yolo.py not modified.")))[cls]}"xt":cls}"m}")
+
+Indexing images...
+Images indexed: 258
+Main CSV files: 258
+Parts CSV files: 257
+
+Fully annotated images: 257
+Excluded images: 1
+
+Converting annotations...
+
+=======================================================
+J35 YOLO DATASET CREATED SUCCESSFULLY
+=======================================================
+
+TRAIN
+Images: 179
+J35: 208
+nose: 204
+wings: 293
+tail: 191
+
+VAL
+Images: 51
+J35: 60
+nose: 59
+wings: 88
+tail: 52
+
+TEST
+Images: 27
+J35: 28
+nose: 27
+wings: 39
+tail: 26
+
+TOTAL IMAGES: 257
+EXCLUDED IMAGES: 1
+
+OUTPUT DIRECTORY:
+/home/admin1/Abishek-Intern/new_atr/data/yolo_j35_parts
+
+DATA YAML:
+/home/admin1/Abishek-Intern/new_atr/data/yolo_j35_parts/data.yaml
+
+Original dataset was not modified.
+=======================================================
+
+
+
+MULTI SCALE MIXUP - YES
+ Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100% ━━━━━━━━━━━━ 48/48
+                   all       4606       7910      0.874       0.74      0.825      0.718
+                   A10         73        129      0.848      0.628      0.804      0.696
+                 A400M         72        109      0.943      0.763      0.879      0.829
+                 AG600         53         64       0.93      0.891      0.937      0.867
+                  AH64         61         97      0.902       0.85      0.893      0.777
+                  AV8B         65        115      0.883      0.817      0.885      0.832
+                 An124         23         27      0.714      0.778      0.776      0.739
+                  An22         64         64      0.895      0.891       0.88       0.61
+                 An225         85         96       0.91      0.737      0.834      0.511
+                  An72         30         43      0.875      0.512      0.655      0.581
+                    B1         74         99       0.83      0.791      0.842      0.771
+                    B2         79        101      0.881      0.822      0.896      0.796
+                   B52        102        135       0.91       0.77      0.875      0.813
+                 Be200         54         59      0.951      0.881      0.968      0.898
+                    C1         27         41      0.892      0.809      0.848      0.798
+                  C130        155        282      0.833      0.777      0.848      0.709
+                   C17         96        148      0.793      0.727      0.843      0.729
+                    C2        151        201      0.887      0.876      0.941      0.902
+                  C390         38         39      0.785      0.641      0.829      0.764
+                    C5         67         70      0.777      0.795      0.839      0.754
+                  CH47         71         80      0.959        0.8      0.884      0.793
+                 CL415         57         73       0.95      0.778      0.877      0.792
+                    E2         57         94      0.898      0.787      0.875      0.784
+                    E7         45         49      0.937      0.939      0.917       0.87
+                EF2000         93        148      0.794      0.662      0.814      0.743
+                EMB314         62        100       0.94       0.82      0.886      0.663
+                  F117         49         67      0.929      0.776      0.859      0.762
+                   F14         54         91      0.921      0.639      0.767      0.708
+                   F15        166        277      0.866      0.796      0.866       0.77
+                   F16        214        377      0.735      0.671       0.74      0.632
+                   F18        153        321      0.777      0.776      0.835      0.725
+                    F2         71        111       0.86       0.55      0.638      0.336
+                   F22         76        116      0.898      0.716      0.823      0.769
+                   F35        182        265        0.8       0.74      0.796      0.689
+                    F4         98        153      0.929      0.739       0.85      0.759
+                    H6         36         77      0.944      0.818       0.92      0.805
+                  Il76         38         47      0.689      0.532      0.655      0.601
+                   J10         65        200      0.904      0.635      0.756      0.662
+                   J20         90        181      0.923      0.762      0.863      0.792
+                   J35         75         97      0.806      0.784      0.774      0.438
+                 JAS39         76        128      0.825      0.703      0.799      0.734
+                  JF17         34         42      0.744      0.643      0.703      0.669
+                   JH7         36         50      0.953      0.816      0.922      0.865
+                 KC135         48         79      0.802       0.72      0.804      0.668
+                  KF21         55         66      0.927      0.712      0.859      0.572
+                 KJ600         43         56      0.877      0.762        0.8      0.632
+                  Ka27         21         35      0.918      0.629       0.66      0.597
+                  Ka52         28         44       0.92      0.773       0.87      0.814
+                   MQ9         43         46      0.929      0.804      0.866      0.779
+                  Mi24         33         55      0.861      0.855      0.921      0.833
+                  Mi26         60         70      0.935      0.828      0.891      0.712
+                  Mi28         49         83      0.927      0.855      0.915      0.785
+                   Mi8         42         65      0.761      0.646      0.748      0.636
+                 Mig29         51         67      0.728      0.448      0.549      0.468
+                 Mig31         57        104      0.912        0.8       0.88      0.772
+            Mirage2000         40         74      0.794      0.727      0.751      0.697
+                    P3         47         81      0.846      0.815      0.843      0.769
+                   RQ4         54         68      0.851      0.794      0.801      0.686
+                Rafale         89        184      0.831      0.641      0.781      0.706
+                  SR71         40         57       0.96      0.772      0.897      0.801
+                  Su24         58         89      0.914      0.685      0.813      0.742
+                  Su25         42         67      0.935      0.701      0.807      0.706
+                  Su34         64         90      0.831      0.678      0.788      0.702
+                  Su47         52         62       0.94       0.79        0.9      0.776
+                  Su57         64        111      0.912      0.745       0.82      0.755
+                   TB2         47         89      0.906      0.434      0.629      0.491
+               Tornado         62         96      0.928       0.75      0.869      0.814
+                 Tu160         56         73      0.932      0.849      0.921      0.834
+                 Tu22M         36         88      0.808      0.682      0.792      0.651
+                  Tu95         53         86      0.936      0.744      0.906      0.782
+                    U2         55         56      0.941      0.854      0.931      0.841
+                  UH60         46         79      0.814      0.595      0.691      0.561
+                   US2        100        108      0.925      0.954      0.958      0.897
+                   V22        106        165      0.933      0.762      0.836       0.66
+                Vulcan         65         91      0.929      0.717      0.849      0.769
+                   WZ7         35         41      0.829       0.61      0.671      0.501
+                  XB70         31         32          1      0.807      0.906      0.789
+                   Y20         49         76      0.786      0.645      0.731      0.617
+                  YF23         65         88      0.879      0.761      0.823      0.685
+                 Tejas         20         26      0.728      0.462      0.639      0.503
+
+
+yolo detect train \
+model=/home/admin1/Abishek-Intern/new_atr/yolov8s.pt \data=/home/admin1/Abishek-Intern/new_atr/data/yolo_79class_balanced_aug/data.yaml \
+epochs=150 \
+imgsz=832 \
+batch= 48 \
+device=0 \
+workers=24 \
+cache=ram \
+amp=True \
+patience=25 \
+multi_scale=True \
+mixup=0.15 \
+copy_paste=0.1 \
+project=/home/admin1/Abishek-Intern/new_atr/models \
+name=yolov8s_832_79class_multiscale \
+seed=42 \
+resume=False
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+yolo detect train \
+  model=/home/admin1/Abishek-Intern/new_atr/yolov8m.pt \
+  data=/home/admin1/Abishek-Intern/new_atr/data/balanced_800/data.yaml \
+  epochs=150 \
+  imgsz=832 \
+  batch=48 \
+  device=0 \
+  workers=16 \
+  cache=ram \
+  amp=True \
+  patience=25 \
+  multi_scale=True \
+  mixup=0.1 \
+  copy_paste=0.1 \
+  project=/home/admin1/Abishek-Intern/new_atr/runs \
+  name=yolov8m_832_78class \
+  seed=42
+
+
+python -c "import kagglehub; print(kagglehub.dataset_download('a2015003713/militaryaircraftdetectiondataset'))"
+https://chatgpt.com/s/t_6a8546dc32b0819192f9d53855f79c28
+https://chatgpt.com/share/6a833050-12b8-83ee-bef3-d7f2550acb6c
+
+Prajbi
+PB@29jan
+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
+
+
+abishekintern9@gmail.com
+Abishek09$
+
+
+
+
+
+ yolo predict model=/home/admin1/Abishek-Intern/new_atr/runs/yolov8s_832_balanced800/weights/best.pt source=/home/admin1/Pictures/images.jpeg imgsz=832 conf=0.05 device=0 save=True
+
+
+
+  0 -> A10
+  1 -> A400M
+  2 -> B1
+  3 -> B2
+  4 -> B52
+  5 -> C130
+  6 -> C17
+  7 -> C2
+  8 -> EF2000
+  9 -> F15
+ 10 -> F16
+ 11 -> F18
+ 12 -> F22
+ 13 -> F35
+ 14 -> F4
+ 15 -> J20
+ 16 -> JAS39
+ 17 -> Rafale
+ 18 -> Su34
+ 19 -> US2
+ 20 -> V22
+
+21 classes above 350+ img:-
+
+YOLOv8s
+640×640
+mAP50     = 0.757
+mAP50-95  = 0.658
+Precision = 0.803
+Recall    = 0.671
+
+YOLOv8s
+832x832
+mAP50 = 0.782
+mAP50-95= 0.689
+Precision = 0.822
+Recall = 0.697
+
+
+| Model / Dataset               | Precision |    Recall |     mAP50 |  mAP50-95 |
+| ----------------------------- | --------: | --------: | --------: | --------: |
+| YOLOv8s 640, original         |     80.3% |     67.1% |     75.7% |     65.8% |
+| YOLOv8s 832, original         |     82.2% |     69.7% |     78.2% |     68.9% |
+| **YOLOv8s 832, balanced 700** | **83.3%** | **71.8%** | **79.5%** | **68.6%** |
+
+
+======================================================================
+BEFORE TARGETED AUGMENTATION — filtered_350
+======================================================================
+ ID CLASS        IMAGES    INSTANCES
+----------------------------------------------------------------------
+  0 A10             360          605
+  1 A400M           305          398
+  2 B1              360          510
+  3 B2              343          444
+  4 B52             290          468
+  5 C130            639         1213
+  6 C17             384          555
+  7 C2              450          579
+  8 EF2000          367          642
+  9 F15             693         1178
+ 10 F16             793         1542
+ 11 F18             630         1387
+ 12 F22             337          571
+ 13 F35             721         1200
+ 14 F4              350          525
+ 15 J20             366          684
+ 16 JAS39           272          467
+ 17 Rafale          315          606
+ 18 Su34            303          411
+ 19 US2             458          509
+ 20 V22             450          697
+----------------------------------------------------------------------
+Total label files: 8,180
+Total instances:   15,191
+
+======================================================================
+AFTER TARGETED AUGMENTATION — balanced_700
+======================================================================
+ ID CLASS        IMAGES    INSTANCES
+----------------------------------------------------------------------
+  0 A10             734         1222
+  1 A400M           761          966
+  2 B1              778         1086
+  3 B2              759          982
+  4 B52             770         1211
+  5 C130            819         1639
+  6 C17             746         1069
+  7 C2              715          919
+  8 EF2000          779         1326
+  9 F15             870         1496
+ 10 F16             988         1952
+ 11 F18             848         1853
+ 12 F22             759         1257
+ 13 F35             862         1401
+ 14 F4              722         1076
+ 15 J20             704         1290
+ 16 JAS39           738         1301
+ 17 Rafale          764         1476
+ 18 Su34            701          963
+ 19 US2             708          786
+ 20 V22             714         1098
+----------------------------------------------------------------------
+Total images:      13,808
+Total instances:   26,369
+======================================================================
+
+
+
+yolo detect train \
+    model=/home/admin1/Abishek-Intern/new_atr/yolov8s.pt \
+    data=/home/admin1/Abishek-Intern/new_atr/data/balanced_800/data.yaml \
+    epochs=100 \
+    imgsz=832 \
+    batch=32 \
+    device=0 \
+    workers=16 \
+    cache=ram \
+    amp=True \
+    patience=20 \
+    project=/home/admin1/Abishek-Intern/new_atr/runs \
+    name=yolov8s_832_balanced800 \
+    seed=42
+    
+    yolo detect train \
+    model=/home/admin1/Abishek-Intern/new_atr/yolov8s.pt \
+    data=/home/admin1/Abishek-Intern/new_atr/data/balanced_800/data.yaml \
+    epochs=100 \
+    imgsz=832 \
+    batch=32 \
+    device=0 \
+    workers=16 \
+    cache=ram \
+    project=/home/admin1/Abishek-Intern/new_atr/runs \
+    name=yolov8s_832_balanced800 \
+    patience=20
+    
+    yolo detect train \
+    model=/home/admin1/Abishek-Intern/new_atr/runs/yolov8s_832_balanced800/weights/best.pt \
+    data=/home/admin1/Abishek-Intern/new_atr/data/balanced_800/data.yaml \
+    epochs=25 \
+    imgsz=832 \
+    batch=32 \
+    device=0 \
+    workers=16 \
+    cache=ram \
+    amp=True \
+    patience=10 \
+    project=/home/admin1/Abishek-Intern/new_atr/runs \
+    name=yolov8s_832_balanced800_finetune25 \
+    seed=42
+    
+    
+    
+        A10         73        129      0.838      0.527      0.678      0.557
+                 A400M         72        109      0.848      0.679      0.799      0.703
+                 AG600         53         64      0.931      0.859      0.936      0.803
+                  AH64         61         97      0.806      0.769      0.818      0.643
+                  AV8B         65        115      0.845      0.765      0.785      0.677
+                 An124         23         27      0.623      0.704      0.726      0.629
+                  An22         16         16      0.727      0.832      0.884      0.844
+                 An225         25         27      0.745      0.542      0.617      0.552
+                  An72         30         43      0.803      0.465      0.628      0.526
+                    B1         74         99      0.789      0.778      0.823      0.697
+                    B2         79        101      0.865      0.772      0.832      0.658
+                   B52        102        135      0.812      0.704       0.76      0.641
+                 Be200         54         59       0.98      0.835      0.946      0.843
+                    C1         27         41      0.767      0.707      0.787      0.686
+                  C130        155        282      0.915      0.621      0.776      0.598
+                   C17         96        148      0.747      0.655      0.733      0.583
+                    C2        151        201      0.932      0.796      0.918      0.859
+                  C390         38         39      0.818      0.795      0.844      0.739
+                    C5         67         70      0.781      0.714       0.78      0.705
+                  CH47         71         80      0.936      0.737      0.841      0.715
+                 CL415         57         73      0.884      0.781      0.859      0.735
+                    E2         57         94      0.878      0.787      0.857      0.698
+                    E7         45         49      0.911      0.796      0.894      0.809
+                EF2000         93        148      0.794      0.598      0.717      0.626
+                EMB314         17         55       0.74      0.691      0.765      0.613
+                  F117         49         67      0.854      0.784      0.824      0.653
+                   F14         54         91      0.816      0.538      0.628      0.523
+                   F15        166        277      0.835      0.621      0.726      0.615
+                   F16        214        377       0.72      0.545      0.612      0.482
+                   F18        153        321      0.694       0.65      0.695      0.556
+                    F2         19         30      0.775      0.333      0.368      0.343
+                   F22         76        116      0.714      0.612      0.691      0.591
+                   F35        182        265      0.691      0.617      0.668      0.556
+                    F4         98        153      0.908      0.562      0.713      0.594
+                    H6         36         77      0.928      0.843      0.862      0.694
+                  Il76         38         47      0.724      0.489      0.604      0.536
+                   J10         65        200      0.868      0.535      0.663      0.563
+                   J20         90        181      0.863      0.635       0.78      0.687
+                   J35         28         39      0.809      0.651      0.786      0.736
+                 JAS39         76        128      0.687       0.55      0.607      0.519
+                  JF17         34         42       0.81      0.571      0.674      0.593
+                   JH7         36         50      0.969      0.625      0.826      0.756
+                 KC135         48         79      0.782      0.709      0.765      0.586
+                  KF21         17         19          1      0.571      0.729      0.699
+                 KJ600         16         19      0.788      0.789      0.861      0.791
+                  Ka27         21         35      0.901      0.543      0.595      0.528
+                  Ka52         28         44      0.903      0.638      0.863      0.742
+                   MQ9         43         46      0.667      0.785      0.777      0.671
+                  Mi24         33         55      0.765      0.771      0.858      0.741
+                  Mi26         21         22      0.898      0.797       0.86      0.619
+                  Mi28         16         39      0.901      0.821      0.894      0.775
+                   Mi8         42         65      0.831      0.569       0.67      0.578
+                 Mig29         51         67      0.631      0.343      0.407      0.348
+                 Mig31         57        104      0.861      0.772      0.808      0.686
+            Mirage2000         40         74      0.626      0.568      0.582      0.499
+                    P3         47         81       0.82      0.788      0.827      0.731
+                   RQ4         54         68      0.929      0.706      0.796      0.565
+                Rafale         89        184       0.75      0.592      0.702      0.589
+                  SR71         40         57      0.987      0.789      0.901      0.743
+                  Su24         58         89      0.784       0.64      0.721      0.603
+                  Su25         42         67       0.81      0.642      0.735      0.592
+                  Su34         64         90      0.832      0.659      0.751      0.623
+                  Su47         17         17      0.944      0.999      0.986      0.925
+                  Su57         64        111      0.952      0.649      0.761      0.679
+                   TB2         23         62      0.859      0.197      0.448      0.272
+               Tornado         62         96      0.895      0.542       0.75      0.661
+                 Tu160         56         73      0.897      0.833      0.927      0.791
+                 Tu22M         36         88       0.77      0.602      0.698      0.508
+                  Tu95         53         86      0.833      0.752      0.847      0.694
+                    U2         55         56       0.79      0.911      0.902       0.75
+                  UH60         46         79      0.698       0.43      0.548      0.396
+                   US2        100        108        0.9      0.898      0.957      0.848
+                   V22        106        165      0.882      0.642      0.777      0.578
+                Vulcan         65         91      0.938      0.637      0.783      0.681
+                   WZ7         16         19      0.895      0.632      0.678      0.548
+                  XB70         31         32      0.945      0.781      0.918      0.666
+                   Y20         49         76      0.789      0.592      0.701      0.553
+                  YF23         23         33      0.909      0.818      0.857      0.727
+                  
+
+
+
+
+EigenCAM -5
+
+
+
+
+
+
+TEST :
+yolo predict \
+    model=/home/admin1/Abishek-Intern/new_atr/runs/yolov8s_832_targeted_aug/weights/best.pt \
+    source=/home/admin1/Abishek-Intern/new_atr/data/test \
+    imgsz=832 \
+    conf=0.05 \
+    device=0 \
+    save=True \
+    project=/home/admin1/Abishek-Intern/new_atr/data/test \
+    name=new_test
+    
+    
+    NEW TRAINING : 
+    yolo detect train \
+model=/home/admin1/Abishek-Intern/new_atr/yolov8s.pt \
+data=/home/admin1/Abishek-Intern/new_atr/data/yolo_79class_balanced_aug/data.yaml \
+epochs=150 \
+imgsz=832 \
+batch=48 \
+device=0 \
+workers=24 \
+cache=ram \
+amp=True \
+patience=25 \
+multi_scale=True \
+mixup=0.15 \
+copy_paste=0.1 \
+project=/home/admin1/Abishek-Intern/new_atr/runs \
+name=yolov8s_832_targeted_aug \
+seed=42 \
+resume=False
+
+
+
+    
+Original training data
+↓
+Keep every original training image
+↓
+Identify weaker/underrepresented classes
+↓
+Generate additional augmented images for those classes
+↓
+Use stronger augmentation for very weak classes
+↓
+Use moderate augmentation for moderately weak classes
+↓
+Don't unnecessarily augment strong classes
+↓
+Validation/test remain completely untouched
+↓
+Train a new YOLOv8s model
+↓
+Compare against the old balanced800 model
+
+
+STRONG AUGUMENTATION 
+
+Original image
+     │
+     ├── Horizontal flip
+     ├── Scale change       (88–112%)
+     ├── Translation        (±6%)
+     ├── Rotation           (±9°)
+     ├── Shear              (±3°)
+     ├── Brightness/contrast (±20%)
+     ├── Color variation
+     ├── Noise OR blur
+     └── stronger variation
+             │
+             ▼
+       New training image
+       
+       
+  MODERATE AUGUMENATION
+  
+  
+  Original image
+     │
+     ├── Horizontal flip      (50%)
+     ├── Small scale change   (92–108%)
+     ├── Small translation    (±4%)
+     ├── Small rotation       (±7°)
+     ├── Small shear          (±2°)
+     ├── Brightness/contrast  (±15%)
+     ├── Color variation
+     └── Small noise
+             │
+             ▼
+       New training image
+       
+      
+       
+TRAIN — Total images: 24899
+Images with labels: 24899
+Images without label files: 0
+
+VAL — Total images: 4590
+Images with labels: 4590
+Images without label files: 0
+
+TEST — Total images: 1663
+Images with labels: 1663
+Images without label files: 0
+
+TOTAL IMAGE FILES ACROSS ALL SPLITS: 31152
+TOTAL TRAIN IMAGES: 28748 class-image assignments
+TOTAL VAL IMAGES: 5153 class-image assignments
+TOTAL TEST IMAGES: 1860 class-image assignments
+UNIQUE CLASSES: 78
+(aircraft_env) admin1@AI:~/Abishek-Intern/new_atr$ 
+
+
+

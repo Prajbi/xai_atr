@@ -13,13 +13,13 @@ from pytorch_grad_cam import EigenCAM, XGradCAM
 from pytorch_grad_cam.utils.image import show_cam_on_image
 from ultralytics import YOLO
 
-
 # PAGE CONFIG
 st.set_page_config(page_title="Aircraft Detection Dashboard", page_icon="✈️", layout="wide", initial_sidebar_state="expanded")
 
 # PROJECT PATH
 PROJECT_ROOT = Path("/home/admin1/Abishek-Intern/new_atr")
-MODEL_PATH = PROJECT_ROOT / "models" / "yolov8s_832_79class_multiscale" / "weights" / "best.pt"
+MODEL_PATH = PROJECT_ROOT / "models"  / "best (2).pt"
+#/ "yolov8s_832_79class_multiscale" / "weights"
 # / "main" / "models" / "yolo_aircraft.pt"
 # / "models" / "yolov8s_832_targeted_aug" / "weights" / "best.pt"
 
@@ -33,7 +33,6 @@ GPU_NAME = torch.cuda.get_device_name(0)
 IMGSZ = 832
 GRAY = 114 / 255.0
 
-
 # LOAD MODEL
 @st.cache_resource
 def load_model():
@@ -41,21 +40,17 @@ def load_model():
         st.error(f"Model file not found:\n\n{MODEL_PATH}")
         st.stop()
     return YOLO(str(MODEL_PATH))
-
-
 model = load_model()
 
 # METHOD REGISTRY + AUTOMATIC LAYER CANDIDATES
 CAM_REGISTRY = {"EigenCAM": EigenCAM, "XGradCAM": XGradCAM}
 OTHER_METHODS = ["SmoothGrad", "Occlusion"]
 ALL_METHODS = list(CAM_REGISTRY) + OTHER_METHODS
-
-EIGEN_LAYERS = [-2, -3, -4]        # tried automatically for EigenCAM
-GRAD_LAYERS = [-8, -9, -10]        # tried automatically for gradient CAMs
+EIGEN_LAYERS = [-2, -3, -4]        
+GRAD_LAYERS = [-8, -9, -10]        
 SLOW_METHODS = set()
 SLOW_LAYERS = [-9]
-W_LOC = 0.5                        # fixed 50/50 balance: localization vs faithfulness
-
+W_LOC = 0.5                       
 
 def layers_for(method):
     if method == "EigenCAM":
@@ -90,12 +85,8 @@ if not uploaded_files:
     st.stop()
 
 
-# =========================== INTERACTIVE COMPONENT ===========================
-# FIX: components.html() is one-way (it can never return a value to Python), so the old
-# "click a box to select" never reached Streamlit. This is a real bidirectional component
-# (declare_component) served from a small local folder that is written automatically.
-COMPONENT_DIR = Path(__file__).parent / "aircraft_component"
 
+COMPONENT_DIR = Path(__file__).parent / "aircraft_component"
 COMPONENT_HTML = r"""<!DOCTYPE html>
 <html>
 <head>
@@ -114,7 +105,6 @@ COMPONENT_HTML = r"""<!DOCTYPE html>
 </style>
 </head>
 <body>
-<div id="hint">Hover over a box to preview that aircraft; click to select it.</div>
 <div id="stage">
   <canvas id="view"></canvas>
   <div id="popup">
@@ -262,17 +252,13 @@ COMPONENT_HTML = r"""<!DOCTYPE html>
 </html>
 """
 
-
 def _ensure_component_files():
     COMPONENT_DIR.mkdir(exist_ok=True)
     index = COMPONENT_DIR / "index.html"
     if not index.exists() or index.read_text(encoding="utf-8") != COMPONENT_HTML:
         index.write_text(COMPONENT_HTML, encoding="utf-8")
-
-
 _ensure_component_files()
 _aircraft_component = components.declare_component("aircraft_selector", path=str(COMPONENT_DIR))
-
 
 def render_interactive_detection(image_rgb, detections, selected_id, key, height=560):
     """Interactive detection canvas. Returns {"id": int, "t": ms} after a click, otherwise None."""
@@ -289,7 +275,7 @@ def render_interactive_detection(image_rgb, detections, selected_id, key, height
                                height=height, key=key, default=None)
 
 
-# =========================== XAI CORE ===========================
+#XAI CORE
 class YoloCamWrapper(torch.nn.Module):
     def __init__(self, yolo_model):
         super().__init__()
@@ -299,27 +285,21 @@ class YoloCamWrapper(torch.nn.Module):
         out = self.model(x)
         return out[0] if isinstance(out, (tuple, list)) else out   # (B, 4+nc, N)
 
-
 @st.cache_resource
 def get_wrapper(_yolo_model):
     w = YoloCamWrapper(_yolo_model).to(CUDA)
     w.eval()
     return w
-
-
 class AnchorClassTarget:
     """Class score of ONE specific anchor = the prediction for the chosen aircraft."""
     def __init__(self, cls_id, anchor_idx):
         self.cls_id, self.anchor_idx = cls_id, anchor_idx
-
     def __call__(self, model_output):          # (4+nc, N)
         return model_output[4 + self.cls_id, self.anchor_idx]
-
 
 def score_fn(out, cls_id, idxs):
     """Best class score among the anchors that belong to the chosen detection. (B,)"""
     return out[:, 4 + cls_id, :][:, idxs].max(dim=1).values
-
 
 def prepare_input(image_rgb, imgsz=IMGSZ):
     h, w = image_rgb.shape[:2]
@@ -331,7 +311,6 @@ def prepare_input(image_rgb, imgsz=IMGSZ):
     canvas[pad_top:pad_top + new_h, pad_left:pad_left + new_w] = resized
     tensor = torch.from_numpy(canvas.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0).to(CUDA)
     return tensor, resized, pad_top, pad_left, new_h, new_w, scale
-
 
 @torch.no_grad()
 def match_anchors(wrapped, tensor, cls_id, box_lb, iou_thr=0.5):
@@ -350,7 +329,6 @@ def match_anchors(wrapped, tensor, cls_id, box_lb, iou_thr=0.5):
     best = int(cand[cls_scores[cand].argmax()])
     return best, cand, float(cls_scores[best])
 
-
 def norm01(m, clip_pct=None):
     m = np.nan_to_num(m.astype(np.float32))
     if clip_pct:
@@ -359,8 +337,7 @@ def norm01(m, clip_pct=None):
     mx = m.max()
     return m / mx if mx > 1e-8 else m
 
-
-# ---------- CAM family ----------
+#CAM
 def run_cam(method, layer, wrapped, tensor, target):
     cam_cls = CAM_REGISTRY[method]
     x = tensor.clone().detach().requires_grad_(True)
@@ -373,8 +350,7 @@ def run_cam(method, layer, wrapped, tensor, target):
             g = cam(input_tensor=x, targets=[target])
     return g[0]
 
-
-# ---------- input-gradient family ----------
+#I/P Grad 
 def _input_grad(wrapped, x, target):
     x = x.clone().detach().requires_grad_(True)
     wrapped.zero_grad(set_to_none=True)
@@ -383,15 +359,13 @@ def _input_grad(wrapped, x, target):
         target(out).backward()
     return x.grad.detach()
 
-
 def smoothgrad_map(wrapped, tensor, target, n=16, sigma=0.08):
     acc = torch.zeros_like(tensor)
     for _ in range(n):
         acc += _input_grad(wrapped, tensor + sigma * torch.randn_like(tensor), target).abs()
     return acc.amax(1)[0].cpu().numpy()
 
-
-# ---------- perturbation family ----------
+#Perturbation 
 @torch.no_grad()
 def occlusion_map(wrapped, tensor, cls_id, idxs, base, patch=96, stride=48, bs=16):
     H = tensor.shape[-1]
@@ -411,7 +385,6 @@ def occlusion_map(wrapped, tensor, cls_id, idxs, base, patch=96, stride=48, bs=1
             cnt[y:y + patch, x:x + patch] += 1
     return heat / np.maximum(cnt, 1)
 
-
 def compute_heat(method, layer, wrapped, tensor, target, cls_id, idxs, base):
     if method in CAM_REGISTRY:
         return norm01(run_cam(method, layer, wrapped, tensor, target))
@@ -421,8 +394,7 @@ def compute_heat(method, layer, wrapped, tensor, target, cls_id, idxs, base):
         return norm01(cv2.GaussianBlur(occlusion_map(wrapped, tensor, cls_id, idxs, base), (0, 0), 12))
     raise ValueError(method)
 
-
-# ---------- metrics (used internally to pick the best method) ----------
+#Metrics 
 def localization(heat, box_lb):
     H, W = heat.shape
     x1, y1, x2, y2 = [int(round(v)) for v in box_lb]
@@ -435,7 +407,6 @@ def localization(heat, box_lb):
     loc = float(np.clip((inside - area) / (1 - area + 1e-9), 0, 1))
     iy, ix = np.unravel_index(np.argmax(heat), heat.shape)
     return loc, int(x1 <= ix < x2 and y1 <= iy < y2)
-
 
 @torch.no_grad()
 def faithfulness(wrapped, tensor, heat, cls_id, idxs, base, fracs=(0.05, 0.10, 0.20, 0.30)):
@@ -456,8 +427,7 @@ def faithfulness(wrapped, tensor, heat, cls_id, idxs, base, fracs=(0.05, 0.10, 0
     n = len(fracs)
     return float(np.clip(sc[n:].mean() - sc[:n].mean(), 0, 1))
 
-
-# ---------- orchestration (cached per image + detection + methods) ----------
+#Det+metho
 @st.cache_data(show_spinner=False, max_entries=64)
 def explain_detection(_model, image_np, cls_id, box_xyxy, methods):
     wrapped = get_wrapper(_model)
@@ -468,7 +438,6 @@ def explain_detection(_model, image_np, cls_id, box_xyxy, methods):
     target = AnchorClassTarget(cls_id, anchor_idx)
     with torch.no_grad():
         base = float(score_fn(wrapped(tensor), cls_id, idxs)[0])
-
     results = []
     for m in methods:
         tried, last_err = [], ""
@@ -494,7 +463,7 @@ def explain_detection(_model, image_np, cls_id, box_xyxy, methods):
             "base_score": base, "anchor_score": anchor_score, "results": results}
 
 
-# ---------- selected-aircraft rendering ----------
+#Selected aircraft rendering 
 def crop_with_margin(img, box, margin=0.45, min_width=420):
     x1, y1, x2, y2 = [float(v) for v in box]
     h, w = img.shape[:2]
@@ -509,7 +478,6 @@ def crop_with_margin(img, box, margin=0.45, min_width=420):
         crop = cv2.resize(crop, None, fx=factor, fy=factor, interpolation=cv2.INTER_CUBIC)
     return crop
 
-
 def render_selected_explainability(explain_result):
     view_rgb = explain_result["view_rgb"]
     box = explain_result["box_view"]
@@ -520,7 +488,6 @@ def render_selected_explainability(explain_result):
         for failure in failures:
             st.caption(f"{failure['name']}: {failure['error']}")
         return
-
     valid.sort(key=lambda r: r["combined"], reverse=True)
     st.success(f"Best technique for this aircraft: **{valid[0]['name']}**")
     cols = st.columns(2)
@@ -535,11 +502,9 @@ def render_selected_explainability(explain_result):
         st.warning(f"{failure['name']} failed: {failure['error']}")
 
 
-# =========================== PIPELINE ===========================
+#PIPELINE
 st.divider()
 st.subheader(f"Detection Results ({len(uploaded_files)} Images)")
-
-
 @st.cache_data(show_spinner=False, max_entries=32)
 def cached_detect(image_bytes, conf, imgsz):
     """Cache deterministic detection output so Streamlit reruns don't rerun YOLO."""
@@ -560,33 +525,27 @@ def cached_detect(image_bytes, conf, imgsz):
             })
     return image_np, detections
 
-
 for image_number, uploaded_file in enumerate(uploaded_files, start=1):
     st.markdown(f"## Image {image_number}: `{uploaded_file.name}`")
     image_bytes = uploaded_file.getvalue()
     image_np, detections = cached_detect(image_bytes, confidence, IMGSZ)
     original_image = Image.fromarray(image_np)
-
     uid = f"{image_number}_{uploaded_file.name}"
     selection_key = f"selected_aircraft_{uid}"
     dropdown_key = f"aircraft_select_{uid}"
     comp_key = f"aircraft_hover_{uid}"
     last_click_key = f"last_click_{uid}"
-
     current_selection = st.session_state.get(selection_key, 0)
     if not detections:
         current_selection = None
     elif current_selection is None or current_selection >= len(detections):
         current_selection = 0
-
     col1, col2 = st.columns(2, gap="large")
     with col1:
         st.markdown("### 1. Original Image")
         st.image(original_image, use_container_width=True)
-
     with col2:
         st.markdown("### 2. YOLOv8 Detection")
-        st.caption("Hover over a bounding box for a floating zoom popup. Click a box to select that aircraft.")
         if detections:
             click = render_interactive_detection(image_np, detections, current_selection, key=comp_key)
             # FIX: the component keeps its last value across reruns, so only react when the
@@ -600,16 +559,11 @@ for image_number, uploaded_file in enumerate(uploaded_files, start=1):
                     st.session_state[dropdown_key] = cid
         else:
             st.info("No aircraft detected.")
-
     if detections:
         if current_selection is None or current_selection >= len(detections):
             current_selection = 0
-
-        # FIX: don't pass `index=` together with a session_state-controlled key
-        # (avoids Streamlit's "default value and session state" warning).
         if dropdown_key not in st.session_state or st.session_state[dropdown_key] >= len(detections):
             st.session_state[dropdown_key] = current_selection
-
         selected_id = st.selectbox(
             "Selected aircraft (click a box above or choose here)",
             options=list(range(len(detections))),
@@ -619,8 +573,6 @@ for image_number, uploaded_file in enumerate(uploaded_files, start=1):
         st.session_state[selection_key] = selected_id
         selected = detections[selected_id]
         selected_box = (selected["X1"], selected["Y1"], selected["X2"], selected["Y2"])
-
-        # If the dropdown differs from what the canvas highlights, show a quick preview.
         if selected_id != current_selection:
             st.markdown(f"**Current selection: #{selected_id + 1} — {selected['Aircraft']}**")
             st.image(
@@ -628,25 +580,19 @@ for image_number, uploaded_file in enumerate(uploaded_files, start=1):
                 caption="Quick zoom preview of the current dropdown selection.",
                 use_container_width=True,
             )
-
         st.markdown("### 3. Detection list")
         display_df = pd.DataFrame([
             {"ID": f"#{i + 1}", "Aircraft": d["Aircraft"], "Confidence": f"{d['Confidence']:.2%}"}
             for i, d in enumerate(detections)
         ])
         st.dataframe(display_df, use_container_width=True, hide_index=True)
-
         st.markdown("### 4. Selected Aircraft Details")
         st.write(f"**Aircraft #{selected_id + 1}:** {selected['Aircraft']}  |  **Confidence:** {selected['Confidence']:.2%}")
         st.image(crop_with_margin(image_np, selected_box), caption="Cropped from the original image.", use_container_width=True)
-
         st.markdown("### 5. Explainability of Selected Aircraft")
-        # Runs automatically for the selected aircraft. Results are cached (st.cache_data), so
-        # reruns and switching back to an already-explained aircraft are instant.
         with st.spinner(f"Running explainability for Aircraft #{selected_id + 1} ({selected['Aircraft']})…"):
             result = explain_detection(model, image_np, selected["ClassID"], selected_box, tuple(ALL_METHODS))
         render_selected_explainability(result)
-
         st.markdown("### Detection Summary")
         summary_cols = st.columns(4)
         summary_cols[0].metric("Total Detections", len(detections))
